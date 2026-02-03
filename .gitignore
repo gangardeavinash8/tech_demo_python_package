@@ -1,0 +1,24 @@
+# Security
+.env
+.env.*
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Build & Distribution
+dist/
+build/
+*.egg-info/
+
+# Install
+.venv/
+venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
