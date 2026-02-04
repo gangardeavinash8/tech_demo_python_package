@@ -15,13 +15,16 @@ class S3Connector(BaseConnector):
         )
 
     def list_objects(self, prefix: str = "") -> List[FileMetadata]:
-        # Fetch Bucket Tags once to apply to all objects
+        # Fetch Context Data (Tags, Permissions, Users)
         bucket_tags = {}
         try:
             tag_resp = self.client.get_bucket_tagging(Bucket=self.bucket)
             bucket_tags = {t["Key"].strip(): t["Value"] for t in tag_resp.get("TagSet", [])}
         except Exception:
             pass
+
+        access_control = self._get_bucket_permissions()
+        iam_users = self._list_iam_users()
 
         # FetchOwner=True is required to get valid Owner info in the response
         try:
@@ -37,29 +40,9 @@ class S3Connector(BaseConnector):
             if "Owner" in obj:
                 owner_display = obj["Owner"].get("DisplayName") or obj["Owner"].get("ID")
             
-            # Fallback to bucket owner tag if no object owner (though S3 objects usually have owners)
-            # OR if user specifically wants the tag owner info
             if not owner_display and "owner" in bucket_tags:
                 owner_display = bucket_tags["owner"]
-            elif "owner" in bucket_tags:
-                 # If user expects the tag to represent the business owner, we might prioritize it or leave it in tags
-                 # Azure logic fell back. S3 logic: Object Owner is technical (Account/User ID). Tag is business owner.
-                 # Let's keep technical owner in 'owner' field if present, but the tag is now in 'tags'.
-                 # WAIT: User said "why is it showing empty". The field 'tag' was empty. 
-                 # And 'owner' field was canonical ID. 
-                 # They probably want 'owner' field to show "rohit sharama" OR at least 'tag' to show it.
-                 # For consistency with Azure, I will use tag owner if present as a fallback? 
-                 # Or just ensure it's in the tags.
-                 pass
 
-            # Explicit logic: If bucket tag has 'owner', and we want to show it in 'owner' field when technical owner is obscure?
-            # User probably just wants the tags visible.
-            
-            # Update: If technical owner is a long hash (Canonical ID) and tag["owner"] exists, user might prefer tag.
-            # But let's safely put it in tags first.
-
-            # Combined Tags: S3 doesn't return object tags in ListObjects. So 'tags' will just be bucket_tags here.
-            
             results.append(FileMetadata(
                 path=f"s3://{self.bucket}/{obj['Key']}",
                 type="file", 
@@ -71,7 +54,9 @@ class S3Connector(BaseConnector):
                 tags=bucket_tags, 
                 extra_metadata={
                     "storage_class": obj.get("StorageClass"),
-                    "etag": obj.get("ETag")
+                    "etag": obj.get("ETag"),
+                    "access_control": access_control,
+                    "iam_users": iam_users
                 }
             ))
 
@@ -88,13 +73,16 @@ class S3Connector(BaseConnector):
         key = self._parse_path(path)
         response = self.client.head_object(Bucket=self.bucket, Key=key)
         
-        # Fetch Bucket Tags
+        # Fetch Context Data
         bucket_tags = {}
         try:
             tag_resp = self.client.get_bucket_tagging(Bucket=self.bucket)
             bucket_tags = {t["Key"].strip(): t["Value"] for t in tag_resp.get("TagSet", [])}
         except Exception:
             pass
+            
+        access_control = self._get_bucket_permissions()
+        iam_users = self._list_iam_users()
 
         # Try to get object tagging
         tags = bucket_tags.copy()
@@ -127,7 +115,9 @@ class S3Connector(BaseConnector):
             extra_metadata={
                 "storage_class": response.get("StorageClass"),
                 "version_id": response.get("VersionId"),
-                "metadata": response.get("Metadata")
+                "metadata": response.get("Metadata"),
+                "access_control": access_control,
+                "iam_users": iam_users
             }
         )
 
@@ -143,8 +133,39 @@ class S3Connector(BaseConnector):
         return {
             "name": self.bucket,
             "region": region,
-            "source": "s3"
+            "source": "s3",
+            "access_control": self._get_bucket_permissions()
         }
+
+    def _get_bucket_permissions(self) -> Dict[str, Any]:
+        permissions = {"policy": None, "acl": None}
+        
+        # Get Bucket Policy
+        try:
+            policy_resp = self.client.get_bucket_policy(Bucket=self.bucket)
+            permissions["policy"] = policy_resp.get("Policy")
+        except Exception:
+            # Policy might not exist or permission denied
+            pass
+            
+        # Get Bucket ACL
+        try:
+            acl_resp = self.client.get_bucket_acl(Bucket=self.bucket)
+            grants = []
+            for grant in acl_resp.get("Grants", []):
+                grantee = grant.get("Grantee", {})
+                grants.append({
+                    "grantee_type": grantee.get("Type"),
+                    "display_name": grantee.get("DisplayName"),
+                    "id": grantee.get("ID"),
+                    "uri": grantee.get("URI"),
+                    "permission": grant.get("Permission")
+                })
+            permissions["acl"] = grants
+        except Exception:
+            pass
+            
+        return permissions
 
     def get_account_metadata(self) -> Dict[str, Any]:
         """Returns metadata about the AWS Account (Caller)."""
@@ -159,8 +180,32 @@ class S3Connector(BaseConnector):
             "account_id": identity.get("Account"),
             "arn": identity.get("Arn"),
             "user_id": identity.get("UserId"),
-            "source": "s3"
+            "source": "s3",
+            "iam_users": self._list_iam_users()
         }
+
+    def _list_iam_users(self) -> List[Dict[str, str]]:
+        """Lists IAM users in the account to show potential named principals."""
+        users = []
+        try:
+            iam = boto3.client(
+                "iam",
+                aws_access_key_id=self.config.get("aws_access_key_id"),
+                aws_secret_access_key=self.config.get("aws_secret_access_key"),
+                region_name=self.config.get("region")
+            )
+            paginator = iam.get_paginator('list_users')
+            for page in paginator.paginate():
+                for user in page['Users']:
+                    users.append({
+                        "name": user['UserName'],
+                        "arn": user['Arn'],
+                        "id": user['UserId']
+                    })
+        except Exception:
+            # IAM access might be restricted
+            pass
+        return users
 
     def _parse_path(self, path: str) -> str:
         if path.startswith(f"s3://{self.bucket}/"):
