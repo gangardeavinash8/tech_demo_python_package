@@ -21,5 +21,8 @@ def get_connector(source: str, config: Dict[str, Any]) -> BaseConnector:
     elif source == "databricks":
         from .connectors.databricks import DatabricksConnector
         return DatabricksConnector(config)
+    elif source == "sharepoint":
+        from .connectors.sharepoint import SharePointConnector
+        return SharePointConnector(config)
     else:
         raise ValueError(f"Unsupported source: {source}")
