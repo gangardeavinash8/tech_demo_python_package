@@ -1,0 +1,161 @@
+Warning: Data Plane access failed (check RBAC roles): This request is not authorized to perform this operation using this permission.
+RequestId:33101aae-f01e-0039-6982-9b90a3000000
+Time:2026-02-11T18:18:02.2759880Z
+ErrorCode:AuthorizationPermissionMismatch
+Content: <?xml version="1.0" encoding="utf-8"?><Error><Code>AuthorizationPermissionMismatch</Code><Message>This request is not authorized to perform this operation using this permission.
+RequestId:33101aae-f01e-0039-6982-9b90a3000000
+Time:2026-02-11T18:18:02.2759880Z</Message></Error>
+[
+  {
+    "path": "s3://testbucketdemo12340987/test_s3_file.txt",
+    "type": "file",
+    "size_bytes": 9,
+    "last_modified": "2026-02-03T12:41:24+00:00",
+    "source": "s3",
+    "owner": "90767089ff6db67248599b5a10c8d2f6b2f3bfae95d3201a5106bd10aca9b134",
+    "etag": "\"a3930527807725b75c1ba92927d885c9\"",
+    "tag": {
+      "owner": "rohit sharama "
+    },
+    "storage_class": "STANDARD",
+    "access_control": {
+      "policy": null,
+      "acl": [
+        {
+          "grantee_type": "CanonicalUser",
+          "display_name": null,
+          "id": "90767089ff6db67248599b5a10c8d2f6b2f3bfae95d3201a5106bd10aca9b134",
+          "uri": null,
+          "permission": "FULL_CONTROL"
+        }
+      ]
+    },
+    "iam_users": [
+      {
+        "name": "test_suser",
+        "arn": "arn:aws:iam::497676936386:user/test_suser",
+        "id": "AIDAXHX63MTBEZQZYWKQR"
+      }
+    ]
+  },
+  {
+    "path": "azure://demodata/Yatin Jadhav.docx",
+    "type": "Microsoft.Storage/storageAccounts",
+    "size_bytes": 1217255,
+    "last_modified": "2026-02-01T08:54:25+00:00",
+    "source": "blob_storage",
+    "tag": {
+      "owner ": "avinash gangarde"
+    },
+    "location": "eastus",
+    "id": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559/resourceGroups/metadata/providers/Microsoft.Storage/storageAccounts/testmetadata123",
+    "provisioning_state": "Succeeded",
+    "creation_time": "2026-02-01 08:52:06.913364+00:00",
+    "primary_endpoints": {
+      "blob": "https://testmetadata123.blob.core.windows.net/",
+      "queue": "https://testmetadata123.queue.core.windows.net/",
+      "table": "https://testmetadata123.table.core.windows.net/",
+      "file": "https://testmetadata123.file.core.windows.net/",
+      "web": "https://testmetadata123.z13.web.core.windows.net/",
+      "dfs": "https://testmetadata123.dfs.core.windows.net/"
+    },
+    "role_assignments": [
+      {
+        "role_assignment_id": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559/providers/Microsoft.Authorization/roleAssignments/0e2df15b-8447-4fa8-812c-dc1f57e0e3b1",
+        "role": "Owner",
+        "principal_id": "723256cf-65e7-4e57-8e36-c275db7330ab",
+        "principal_type": "User",
+        "scope": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559",
+        "principal_name": "Simnaz Jahagirdar"
+      },
+      {
+        "role_assignment_id": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559/providers/Microsoft.Authorization/roleAssignments/9fb6546a-719c-4dc1-ade3-3e66c01f6a74",
+        "role": "Owner",
+        "principal_id": "723256cf-65e7-4e57-8e36-c275db7330ab",
+        "principal_type": "User",
+        "scope": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559",
+        "principal_name": "Simnaz Jahagirdar"
+      },
+      {
+        "role_assignment_id": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559/resourceGroups/metadata/providers/Microsoft.Authorization/roleAssignments/c7a84642-93b0-42b0-8e8c-b148600fc088",
+        "role": "Reader",
+        "principal_id": "87bcd4a6-2191-4b2b-b28d-0eab50894e01",
+        "principal_type": "ServicePrincipal",
+        "scope": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559/resourceGroups/metadata",
+        "principal_name": "test_application"
+      },
+      {
+        "role_assignment_id": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559/resourceGroups/metadata/providers/Microsoft.Authorization/roleAssignments/a99e8f57-8814-4210-8672-69351f04a625",
+        "role": "Storage Blob Data Reader",
+        "principal_id": "87bcd4a6-2191-4b2b-b28d-0eab50894e01",
+        "principal_type": "ServicePrincipal",
+        "scope": "/subscriptions/ff93113c-05e0-45e8-9fcd-9df5c1022559/resourceGroups/metadata",
+        "principal_name": "test_application"
+      }
+    ]
+  },
+  {
+    "path": "sharepoint://avi4050.sharepoint.com,c3d675eb-b89e-4cfb-8a07-f57bfe1f429e,3dafabf2-eec5-4ae6-9df7-6d66c5c94b26/b!63XWw564-0yKB_V7_h9CnvKrrz3F7uZKnfdtZsXJSyb_fUSkt5V4SocedAyWiwcw/marksheet_1-8.pdf",
+    "type": "file",
+    "size_bytes": 1187414,
+    "last_modified": "2026-02-07T19:51:41+00:00",
+    "source": "sharepoint",
+    "owner": "avinash gangarde",
+    "content_type": "application/pdf",
+    "etag": "\"{A0285A1D-F9F1-4FDB-B51B-E1C2A61A9588},1\"",
+    "tag": {},
+    "drive_id": "b!63XWw564-0yKB_V7_h9CnvKrrz3F7uZKnfdtZsXJSyb_fUSkt5V4SocedAyWiwcw",
+    "item_id": "01HMIDQVY5LIUKB4PZ3NH3KG7BYKTBVFMI",
+    "web_url": "https://avi4050.sharepoint.com/sites/avi-metadata/Shared%20Documents/marksheet_1-8.pdf",
+    "created_by": {
+      "user": {
+        "email": "avinashgangarde@avi4050.onmicrosoft.com",
+        "id": "669b0632-c514-4140-8668-e9e71ef8f5bc",
+        "displayName": "avinash gangarde"
+      }
+    },
+    "last_modified_by": {
+      "user": {
+        "email": "avinashgangarde@avi4050.onmicrosoft.com",
+        "id": "669b0632-c514-4140-8668-e9e71ef8f5bc",
+        "displayName": "avinash gangarde"
+      }
+    }
+  },
+  {
+    "path": "sharepoint://avi4050.sharepoint.com,c3d675eb-b89e-4cfb-8a07-f57bfe1f429e,3dafabf2-eec5-4ae6-9df7-6d66c5c94b26/b!63XWw564-0yKB_V7_h9CnvKrrz3F7uZKnfdtZsXJSyb_fUSkt5V4SocedAyWiwcw/Yatin Jadhav.docx",
+    "type": "file",
+    "size_bytes": 1224262,
+    "last_modified": "2026-02-07T18:54:21+00:00",
+    "source": "sharepoint",
+    "owner": "avinash gangarde",
+    "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "etag": "\"{F29F5FED-1EFE-4F69-931F-0A43B9637689},1\"",
+    "tag": {},
+    "drive_id": "b!63XWw564-0yKB_V7_h9CnvKrrz3F7uZKnfdtZsXJSyb_fUSkt5V4SocedAyWiwcw",
+    "item_id": "01HMIDQV7NL6P7F7Q6NFHZGHYKIO4WG5UJ",
+    "web_url": "https://avi4050.sharepoint.com/sites/avi-metadata/_layouts/15/Doc.aspx?sourcedoc=%7BF29F5FED-1EFE-4F69-931F-0A43B9637689%7D&file=Yatin%20Jadhav.docx&action=default&mobileredirect=true",
+    "created_by": {
+      "user": {
+        "email": "avinashgangarde@avi4050.onmicrosoft.com",
+        "id": "669b0632-c514-4140-8668-e9e71ef8f5bc",
+        "displayName": "avinash gangarde"
+      }
+    },
+    "last_modified_by": {
+      "user": {
+        "email": "avinashgangarde@avi4050.onmicrosoft.com",
+        "id": "669b0632-c514-4140-8668-e9e71ef8f5bc",
+        "displayName": "avinash gangarde"
+      }
+    }
+  },
+  {
+    "path": "/Volumes/fetch_databricks_metadata/default/raw_volume/raw_sales_data.csv",
+    "type": "file",
+    "size_bytes": 253,
+    "last_modified": "2026-02-11T23:42:47",
+    "source": "databricks_volume",
+    "tag": {}
+  }
+]

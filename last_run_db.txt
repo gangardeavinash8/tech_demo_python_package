@@ -1,0 +1,28 @@
+--- Testing Databricks Connector (Volumes) ---
+Debug: Loaded keys from environment:
+  - databricks_host: https://adb-7405606878312320.0.azuredatabricks.net
+  - databricks_token: [PRESENT but masked]
+  - databricks_catalog: fetch_databricks_metadata
+  - databricks_schema: default
+  - databricks_volume: raw_volume
+Initializing connector for Volume: /Volumes/fetch_databricks_metadata/default/raw_volume
+Fetching files via Unity Catalog Volumes API...
+DEBUG: Found item: DirectoryEntry(file_size=253, is_directory=False, last_modified=1770833567000, name='raw_sales_data.csv', path='/Volumes/fetch_databricks_metadata/default/raw_volume/raw_sales_data.csv')
+Traceback (most recent call last):
+  File "/Users/as-mac-0562/Documents/metadata_reader/test_databricks.py", line 48, in main
+    print(results[0].to_json())
+          ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/as-mac-0562/Documents/metadata_reader/metadata_reader/models/metadata.py", line 51, in to_json
+    return json.dumps(self.to_dict(), indent=2)
+                      ^^^^^^^^^^^^^^
+  File "/Users/as-mac-0562/Documents/metadata_reader/metadata_reader/models/metadata.py", line 29, in to_dict
+    "last_modified": self.last_modified.isoformat() if self.last_modified else None,
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'int' object has no attribute 'isoformat'
+
+Found 1 items:
+ - /Volumes/fetch_databricks_metadata/default/raw_volume/raw_sales_data.csv (Size: 253b)
+
+First Item Metadata (Detail):
+
+Failed to fetch Databricks data: 'int' object has no attribute 'isoformat'

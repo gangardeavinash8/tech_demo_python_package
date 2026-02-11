@@ -27,4 +27,7 @@ def load_config_from_env() -> Dict[str, Any]:
         "azure_account_name": os.getenv("AZURE_ACCOUNT_NAME"),
         "databricks_host": os.getenv("DATABRICKS_HOST"),
         "databricks_token": os.getenv("DATABRICKS_TOKEN"),
+        "databricks_catalog": os.getenv("DATABRICKS_CATALOG"),
+        "databricks_schema": os.getenv("DATABRICKS_SCHEMA"),
+        "databricks_volume": os.getenv("DATABRICKS_VOLUME"),
     }

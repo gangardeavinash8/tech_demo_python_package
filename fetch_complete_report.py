@@ -49,6 +49,17 @@ def fetch_all():
             import sys
             print(f"Error fetching SharePoint: {e}", file=sys.stderr)
 
+    # --- Databricks ---
+    if config.get("databricks_host") and config.get("databricks_token"):
+        try:
+             # print("Fetching Databricks metadata...", file=sys.stderr)
+             db = get_connector("databricks", config)
+             results = db.list_objects()
+             all_metadata.extend(results)
+        except Exception as e:
+             import sys
+             print(f"Error fetching Databricks: {e}", file=sys.stderr)
+
     # --- Output JSON ---
     json_output = [item.to_dict() for item in all_metadata]
     print(json.dumps(json_output, indent=2, default=str))
