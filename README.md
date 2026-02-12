@@ -79,3 +79,16 @@ To install this package on a **different laptop** or in a **different folder**:
       ```bash
       pip install metadata_reader-0.3.0-py3-none-any.whl
       ```
+
+## Usage Example
+
+I have included an example script and environment template in the `usage_example/` folder.
+
+1.  **Create a folder** for your run (e.g., `my_run`).
+2.  **Copy** `usage_example/run_metadata.py` and `usage_example/.env.template` to your folder.
+3.  **Rename** `.env.template` to `.env` and fill in your credentials.
+4.  **Run the script**:
+    ```bash
+    python run_metadata.py > output.json
+    ```
+
