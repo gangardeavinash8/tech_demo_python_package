@@ -42,13 +42,22 @@ def main():
 
     # 3. SharePoint
     # Support both SHAREPOINT_SITE_ID and SHAREPOINT_SITE_URL
-    if config.get("sharepoint_client_id") and (config.get("sharepoint_site_id") or config.get("sharepoint_site_url")):
+    sp_id = config.get("sharepoint_client_id")
+    sp_site = config.get("sharepoint_site_id") or config.get("sharepoint_site_url")
+    
+    if sp_id and sp_site:
         try:
             print("Fetching SharePoint metadata...", file=sys.stderr)
             sp = get_connector("sharepoint", config)
             all_metadata.extend(sp.list_objects())
         except Exception as e:
             print(f"Error fetching SharePoint: {e}", file=sys.stderr)
+    else:
+        # Debug why it might be skipped
+        if config.get("sharepoint_client_id"):
+            print("Skipping SharePoint: Missing 'sharepoint_site_id' or 'sharepoint_site_url'", file=sys.stderr)
+        elif config.get("sharepoint_site_id") or config.get("sharepoint_site_url"):
+            print("Skipping SharePoint: Missing 'sharepoint_client_id'", file=sys.stderr)
 
     # 4. Databricks
     if config.get("databricks_host") and config.get("databricks_token"):
@@ -57,19 +66,15 @@ def main():
             
             db = get_connector("databricks", config)
             
-            # Default path to root if not specified
-            path = "/"
-            # If Catalog, Schema, and Volume are provided, construct the path
-            if config.get("databricks_catalog") and config.get("databricks_schema") and config.get("databricks_volume"):
-                 path = f"/Volumes/{config['databricks_catalog']}/{config['databricks_schema']}/{config['databricks_volume']}/"
+            # The connector uses `databricks_catalog`, `databricks_schema`, and `databricks_volume`
+            # from the config to determine the root path. 
+            # We do NOT need to pass the path manually unless we want a subfolder.
             
-            # Try listing with the calculated path
             try:
-                # Assuming list_objects accepts a path argument
-                all_metadata.extend(db.list_objects(path))
-            except TypeError:
-                 # Fallback if list_objects doesn't accept path (depends on implementation)
-                 all_metadata.extend(db.list_objects())
+                # Just call list_objects() to scan the configured volume root
+                all_metadata.extend(db.list_objects())
+            except Exception as e:
+                 print(f"Error calling list_objects for Databricks: {e}", file=sys.stderr)
                  
         except Exception as e:
             print(f"Error fetching Databricks: {e}", file=sys.stderr)
