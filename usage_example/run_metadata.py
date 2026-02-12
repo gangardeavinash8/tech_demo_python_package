@@ -41,6 +41,7 @@ def main():
             print(f"Error fetching Azure: {e}", file=sys.stderr)
 
     # 3. SharePoint
+    # Support both SHAREPOINT_SITE_ID and SHAREPOINT_SITE_URL
     if config.get("sharepoint_client_id") and (config.get("sharepoint_site_id") or config.get("sharepoint_site_url")):
         try:
             print("Fetching SharePoint metadata...", file=sys.stderr)
@@ -53,8 +54,23 @@ def main():
     if config.get("databricks_host") and config.get("databricks_token"):
         try:
             print("Fetching Databricks metadata...", file=sys.stderr)
+            
             db = get_connector("databricks", config)
-            all_metadata.extend(db.list_objects())
+            
+            # Default path to root if not specified
+            path = "/"
+            # If Catalog, Schema, and Volume are provided, construct the path
+            if config.get("databricks_catalog") and config.get("databricks_schema") and config.get("databricks_volume"):
+                 path = f"/Volumes/{config['databricks_catalog']}/{config['databricks_schema']}/{config['databricks_volume']}/"
+            
+            # Try listing with the calculated path
+            try:
+                # Assuming list_objects accepts a path argument
+                all_metadata.extend(db.list_objects(path))
+            except TypeError:
+                 # Fallback if list_objects doesn't accept path (depends on implementation)
+                 all_metadata.extend(db.list_objects())
+                 
         except Exception as e:
             print(f"Error fetching Databricks: {e}", file=sys.stderr)
 
