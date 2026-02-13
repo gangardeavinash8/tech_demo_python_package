@@ -63,61 +63,62 @@ class SharePointConnector(BaseConnector):
             "Content-Type": "application/json"
         }
 
-    def list_objects(self, prefix: str = "") -> List[FileMetadata]:
+    def list_objects(self, prefix: str = "", site_id: str = None, drive_id: str = None) -> List[FileMetadata]:
         headers = self._get_headers()
         results = []
         
+        target_site_id = site_id or self.site_id
+        target_drive_id = drive_id or self.drive_id
+
+        if not target_site_id:
+             raise ValueError("SharePoint Site ID not configured and no override provided.")
+
         # If drive_id is not provided, list all drives (Document Libraries) and their children
         drives = []
-        if self.drive_id:
-            drives = [{"id": self.drive_id}]
+        if target_drive_id:
+            drives = [{"id": target_drive_id}]
         else:
             # Fetch default drive or all drives
-            url = f"https://graph.microsoft.com/v1.0/sites/{self.site_id}/drives"
+            url = f"https://graph.microsoft.com/v1.0/sites/{target_site_id}/drives"
             resp = requests.get(url, headers=headers)
             resp.raise_for_status()
             drives = resp.json().get("value", [])
 
         for drive in drives:
-            drive_id = drive["id"]
-            # drive_name = drive.get("name", "Unknown Drive")
-            # print(f"DEBUG: Scanning Drive: {drive_name} ({drive_id})", flush=True)
+            d_id = drive["id"]
             
             # Recursively list children
-            url = f"https://graph.microsoft.com/v1.0/sites/{self.site_id}/drives/{drive_id}/root/children"
-            self._fetch_children(url, headers, drive_id, results)
+            url = f"https://graph.microsoft.com/v1.0/sites/{target_site_id}/drives/{d_id}/root/children"
+            self._fetch_children(url, headers, target_site_id, d_id, results)
 
         return results
 
-    def _fetch_children(self, url: str, headers: Dict[str, str], drive_id: str, results: List[FileMetadata]):
+    def _fetch_children(self, url: str, headers: Dict[str, str], site_id: str, drive_id: str, results: List[FileMetadata]):
         while url:
             resp = requests.get(url, headers=headers)
             if resp.status_code != 200:
-                # print(f"Error fetching SharePoint items: {resp.text}", flush=True)
                 break
                 
             data = resp.json()
             items = data.get("value", [])
-            # print(f"DEBUG: Found {len(items)} items in current page.", flush=True)
             
             for item in items:
-                # print(f"DEBUG: Found item: {item.get('name')} (Type: {'folder' if 'folder' in item else 'file'})", flush=True)
                 if "file" in item:
-                    results.append(self._map_item_to_metadata(item, drive_id))
+                    results.append(self._map_item_to_metadata(item, site_id, drive_id))
                 elif "folder" in item:
                     # Basic recursion
-                    child_url = f"https://graph.microsoft.com/v1.0/sites/{self.site_id}/drives/{drive_id}/items/{item['id']}/children"
-                    self._fetch_children(child_url, headers, drive_id, results)
+                    child_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/{item['id']}/children"
+                    self._fetch_children(child_url, headers, site_id, drive_id, results)
             
             url = data.get("@odata.nextLink")
 
-    def _map_item_to_metadata(self, item: Dict[str, Any], drive_id: str) -> FileMetadata:
+    def _map_item_to_metadata(self, item: Dict[str, Any], site_id: str, drive_id: str) -> FileMetadata:
         # Map Graph API Item to FileMetadata
-        # User: createdBy, lastModifiedBy
         user = item.get("createdBy", {}).get("user", {}).get("displayName")
         
         # Extra metadata
         extra = {
+            "site_id": site_id,
             "drive_id": drive_id,
             "item_id": item["id"],
             "web_url": item.get("webUrl"),
@@ -138,7 +139,7 @@ class SharePointConnector(BaseConnector):
                 pass
 
         return FileMetadata(
-            path=f"sharepoint://{self.site_id}/{drive_id}/{item.get('name')}",
+            path=f"sharepoint://{site_id}/{drive_id}/{item.get('name')}",
             type="file",
             size_bytes=item.get("size", 0),
             last_modified=last_modified, 
@@ -163,3 +164,38 @@ class SharePointConnector(BaseConnector):
 
     def get_account_metadata(self) -> Dict[str, Any]:
          return {"source": "sharepoint", "tenant_id": self.tenant_id}
+
+class SharePointConnectorBuilder:
+    def __init__(self):
+        self._config = {}
+
+    def tenant_id(self, tenant_id: str):
+        self._config["sharepoint_tenant_id"] = tenant_id
+        return self
+
+    def client_id(self, client_id: str):
+        self._config["sharepoint_client_id"] = client_id
+        return self
+
+    def client_secret(self, client_secret: str):
+        self._config["sharepoint_client_secret"] = client_secret
+        return self
+
+    def site_id(self, site_id: str):
+        self._config["sharepoint_site_id"] = site_id
+        return self
+
+    def site_url(self, site_url: str):
+        self._config["sharepoint_site_url"] = site_url
+        return self
+
+    def drive_id(self, drive_id: str):
+        self._config["sharepoint_drive_id"] = drive_id
+        return self
+
+    def build(self) -> SharePointConnector:
+        if not all([self._config.get("sharepoint_tenant_id"), 
+                    self._config.get("sharepoint_client_id"), 
+                    self._config.get("sharepoint_client_secret")]):
+             raise ValueError("SharePoint tenant_id, client_id, and client_secret are required.")
+        return SharePointConnector(self._config)

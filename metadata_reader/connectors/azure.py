@@ -54,11 +54,12 @@ class AzureConnector(BaseConnector):
             # Fallback to Environment Variables / Managed Identity
             self.credential = DefaultAzureCredential()
 
-    def list_objects(self, prefix: str = "") -> List[FileMetadata]:
-        if not self.container:
-            raise ValueError("Container not configured. Cannot list objects.")
+    def list_objects(self, prefix: str = "", container: str = None) -> List[FileMetadata]:
+        target_container = container or self.container
+        if not target_container:
+            raise ValueError("Container not configured and no override provided.")
             
-        container_client = self.client.get_container_client(self.container)
+        container_client = self.client.get_container_client(target_container)
         results = []
 
         # Try to fetch account tags/props once to apply to all files
@@ -75,7 +76,7 @@ class AzureConnector(BaseConnector):
         # name_starts_with acts as a prefix filter
         for blob in container_client.list_blobs(name_starts_with=prefix):
             results.append(FileMetadata(
-                path=f"azure://{self.container}/{blob.name}",
+                path=f"azure://{target_container}/{blob.name}",
                 type="file", # Blobs are files
                 size_bytes=blob.size,
                 owner=account_tags.get('owner') or account_tags.get('Owner'), # Fallback to account owner
@@ -88,18 +89,19 @@ class AzureConnector(BaseConnector):
 
         return results
 
-    def read_file(self, path: str) -> bytes:
+    def read_file(self, path: str, container: str = None) -> bytes:
         # Expect path to be like azure://container/blob_name or just blob_name
         # If it's the full path we construct, it's "azure://{container}/{blob.name}"
         
+        target_container = container or self.container
         # Simple parsing logic
-        prefix = f"azure://{self.container}/"
+        prefix = f"azure://{target_container}/"
         if path.startswith(prefix):
             blob_name = path[len(prefix):]
         else:
             blob_name = path
             
-        blob_client = self.client.get_blob_client(container=self.container, blob=blob_name)
+        blob_client = self.client.get_blob_client(container=target_container, blob=blob_name)
         return blob_client.download_blob().readall()
 
     def get_metadata(self, path: str) -> FileMetadata:
@@ -210,59 +212,13 @@ class AzureConnector(BaseConnector):
                 )
                 tags = account.tags or {}
                 
-                # Fetch IAM Role Assignments
-                role_assignments = []
-                try:
-                    # Scope for the storage account
-                    scope = account.id
-                    auth_client = AuthorizationManagementClient(self.credential, self.config["azure_subscription_id"])
-                    
-                    # Store role definitions cache
-                    role_defs = {}
-                    
-                    for assignment in auth_client.role_assignments.list_for_scope(scope):
-                        # Get Role Name (display name like 'Owner')
-                        role_id = assignment.role_definition_id
-                        if role_id not in role_defs:
-                            try:
-                                # Role ID is usually full resource path, we need the last part (GUID) or use get_by_id
-                                # Actually get_by_id takes the full ID
-                                role_def = auth_client.role_definitions.get_by_id(role_id)
-                                role_defs[role_id] = role_def.role_name
-                            except:
-                                role_defs[role_id] = "Unknown Role"
-                        
-                        role_assignments.append({
-                            "role_assignment_id": assignment.id,
-                            "role": role_defs[role_id],
-                            "principal_id": assignment.principal_id,
-                            "principal_type": assignment.principal_type,
-                            "scope": assignment.scope
-                        })
-                    
-                    # Resolve Principal Names using Graph API
-                    try:
-                        principal_ids = [ra["principal_id"] for ra in role_assignments]
-                        if principal_ids:
-                            names = self._resolve_principal_names(principal_ids)
-                            for ra in role_assignments:
-                                pid = ra["principal_id"]
-                                if pid in names:
-                                    ra["principal_name"] = names[pid]
-                    except Exception as e:
-                        print(f"Warning: Failed to resolve principal names (Graph API): {e}")
-
-                except Exception as e:
-                    print(f"Warning: Failed to fetch IAM roles: {e}")
-
                 mgmt_props = {
                     "location": account.location,
                     "id": account.id,
                     "type": account.type,
                     "provisioning_state": account.provisioning_state,
                     "creation_time": str(account.creation_time) if hasattr(account, 'creation_time') else None,
-                    "primary_endpoints": account.primary_endpoints.as_dict() if account.primary_endpoints else None,
-                    "role_assignments": role_assignments
+                    "primary_endpoints": account.primary_endpoints.as_dict() if account.primary_endpoints else None
                 }
             except Exception as e:
                 print(f"Warning: Failed to fetch account tags/props: {e}")
@@ -276,44 +232,43 @@ class AzureConnector(BaseConnector):
             "source": "azure"
         }
 
-    def _resolve_principal_names(self, principal_ids: List[str]) -> Dict[str, str]:
-        """
-        Resolves a list of Principal IDs to display names using Microsoft Graph API.
-        Requires Directory.Read.All or User.Read.All permissions.
-        """
-        if not self.credential:
-            return {}
+class AzureConnectorBuilder:
+    def __init__(self):
+        self._config = {}
 
-        # Get Graph Token
-        token = self.credential.get_token("https://graph.microsoft.com/.default")
-        headers = {
-            "Authorization": f"Bearer {token.token}",
-            "Content-Type": "application/json"
-        }
+    def connection_string(self, conn_str: str):
+        self._config["connection_string"] = conn_str
+        return self
 
-        # Use directoryObjects/getByIds for batch resolution
-        # Limit is 1000 items per request
-        url = "https://graph.microsoft.com/v1.0/directoryObjects/getByIds"
-        
-        # Deduplicate IDs
-        unique_ids = list(set(principal_ids))
-        name_map = {}
+    def container(self, container: str):
+        self._config["container"] = container
+        return self
 
-        # Simple batching (assuming < 1000 for now)
-        payload = {
-            "ids": unique_ids,
-            "types": ["user", "group", "servicePrincipal"]
-        }
-        
-        resp = requests.post(url, headers=headers, json=payload)
-        resp.raise_for_status()
-        
-        data = resp.json()
-        for item in data.get("value", []):
-            pid = item.get("id")
-            # displayName is common, specific types might optionally have other fields
-            name = item.get("displayName") or item.get("userPrincipalName") or item.get("appDisplayName")
-            if pid and name:
-                name_map[pid] = name
-                
-        return name_map
+    def subscription_id(self, sub_id: str):
+        self._config["azure_subscription_id"] = sub_id
+        return self
+
+    def client_id(self, client_id: str):
+        self._config["azure_client_id"] = client_id
+        return self
+
+    def client_secret(self, secret: str):
+        self._config["azure_client_secret"] = secret
+        return self
+
+    def tenant_id(self, tenant_id: str):
+        self._config["azure_tenant_id"] = tenant_id
+        return self
+
+    def resource_group(self, rg: str):
+        self._config["azure_resource_group"] = rg
+        return self
+
+    def account_name(self, account_name: str):
+        self._config["azure_account_name"] = account_name
+        return self
+
+    def build(self) -> AzureConnector:
+        if not self._config.get("connection_string") and not self._config.get("azure_account_name"):
+            raise ValueError("Either Azure Connection String or Account Name must be provided.")
+        return AzureConnector(self._config)

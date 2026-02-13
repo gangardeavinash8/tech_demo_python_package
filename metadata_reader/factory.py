@@ -26,3 +26,23 @@ def get_connector(source: str, config: Dict[str, Any]) -> BaseConnector:
         return SharePointConnector(config)
     else:
         raise ValueError(f"Unsupported source: {source}")
+
+def azure_builder() -> Any:
+    """Returns a new AzureConnectorBuilder instance."""
+    from .connectors.azure import AzureConnectorBuilder
+    return AzureConnectorBuilder()
+
+def s3_builder() -> Any:
+    """Returns a new S3ConnectorBuilder instance."""
+    from .connectors.s3 import S3ConnectorBuilder
+    return S3ConnectorBuilder()
+
+def databricks_builder() -> Any:
+    """Returns a new DatabricksConnectorBuilder instance."""
+    from .connectors.databricks import DatabricksConnectorBuilder
+    return DatabricksConnectorBuilder()
+
+def sharepoint_builder() -> Any:
+    """Returns a new SharePointConnectorBuilder instance."""
+    from .connectors.sharepoint import SharePointConnectorBuilder
+    return SharePointConnectorBuilder()

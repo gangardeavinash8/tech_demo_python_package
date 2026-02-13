@@ -12,27 +12,29 @@ class DatabricksConnector(BaseConnector):
         self.catalog = config.get("databricks_catalog")
         self.schema = config.get("databricks_schema")
         self.volume = config.get("databricks_volume")
+        import os # Ensure os is available for join
         
         if not self.host or not self.token:
              raise ValueError("Databricks Host and Token are required.")
              
         self.client = WorkspaceClient(host=self.host, token=self.token)
 
-    def list_objects(self, prefix: str = "") -> List[FileMetadata]:
+    def list_objects(self, prefix: str = "", catalog: str = None, schema: str = None, volume: str = None) -> List[FileMetadata]:
         """
         Lists files from the configured Unity Catalog Volume.
         Path format: /Volumes/catalog/schema/volume
         """
-        if not self.catalog or not self.schema or not self.volume:
-             # Fallback to DBFS if Volume info missing? Or raise error?
-             # For now, let's assume if Volume info is missing, we might use DBFS or just error out.
-             # Given user request "fetch details of databricks volume", let's prioritize Volumes.
+        target_catalog = catalog or self.catalog
+        target_schema = schema or self.schema
+        target_volume = volume or self.volume
+
+        if not target_catalog or not target_schema or not target_volume:
              if prefix.startswith("dbfs:"):
                  return self._list_dbfs(prefix)
-             raise ValueError("Databricks Catalog, Schema, and Volume must be configured.")
+             raise ValueError("Databricks Catalog, Schema, and Volume must be configured or provided as overrides.")
 
         # Construct Volume Root Path
-        volume_root = f"/Volumes/{self.catalog}/{self.schema}/{self.volume}"
+        volume_root = f"/Volumes/{target_catalog}/{target_schema}/{target_volume}"
         
         # If prefix provided, append it (handle leading slashes)
         search_path = volume_root
@@ -107,3 +109,32 @@ class DatabricksConnector(BaseConnector):
 
     def get_account_metadata(self) -> Dict[str, Any]:
         raise NotImplementedError("Databricks account metadata fetching is not yet implemented")
+
+class DatabricksConnectorBuilder:
+    def __init__(self):
+        self._config = {}
+
+    def host(self, host: str):
+        self._config["databricks_host"] = host
+        return self
+
+    def token(self, token: str):
+        self._config["databricks_token"] = token
+        return self
+
+    def catalog(self, catalog: str):
+        self._config["databricks_catalog"] = catalog
+        return self
+
+    def schema(self, schema: str):
+        self._config["databricks_schema"] = schema
+        return self
+
+    def volume(self, volume: str):
+        self._config["databricks_volume"] = volume
+        return self
+
+    def build(self) -> DatabricksConnector:
+        if not self._config.get("databricks_host") or not self._config.get("databricks_token"):
+            raise ValueError("Databricks Host and Token are required.")
+        return DatabricksConnector(self._config)
