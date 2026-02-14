@@ -36,6 +36,31 @@ class S3Connector(BaseConnector):
             all_files = []
             for b in buckets:
                 try:
+                    # Fetch bucket metadata (tags, region)
+                    region = "us-east-1"
+                    try:
+                        loc_resp = self.client.get_bucket_location(Bucket=b)
+                        region = loc_resp.get("LocationConstraint") or "us-east-1"
+                    except Exception: pass
+                    
+                    tags = {}
+                    try:
+                        tag_resp = self.client.get_bucket_tagging(Bucket=b)
+                        tags = {t["Key"]: t["Value"] for t in tag_resp.get("TagSet", [])}
+                    except Exception: pass
+
+                    # Add bucket entry itself
+                    all_files.append(FileMetadata(
+                        path=f"s3://{b}",
+                        type="bucket",
+                        size_bytes=0,
+                        last_modified=None,
+                        source="s3",
+                        owner=tags.get("owner") or tags.get("Owner"),
+                        tags=tags,
+                        extra_metadata={"region": region}
+                    ))
+
                     all_files.extend(self.list_objects(prefix=prefix, bucket=b))
                 except Exception as e:
                     print(f" ❌ Error scanning bucket {b}: {e}", file=os.sys.stderr)

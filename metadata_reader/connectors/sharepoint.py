@@ -102,6 +102,19 @@ class SharePointConnector(BaseConnector):
             all_files = []
             for site in sites:
                 try:
+                    # Add site entry itself
+                    all_files.append(FileMetadata(
+                        path=f"sharepoint://{site['id']}",
+                        type="site",
+                        size_bytes=0,
+                        last_modified=None,
+                        source="sharepoint",
+                        tags={},
+                        extra_metadata={
+                            "site_name": site["name"],
+                            "web_url": site["webUrl"]
+                        }
+                    ))
                     all_files.extend(self.list_objects(prefix=prefix, site_id=site["id"], drive_id=drive_id))
                 except Exception as e:
                     print(f"  ❌ Error scanning site {site['name']}: {e}", file=os.sys.stderr)

@@ -45,6 +45,23 @@ class AzureConnector(BaseConnector):
             self.mgmt_client = StorageManagementClient(self.credential, config["azure_subscription_id"])
             
         self._account_metadata_cache = None
+        
+        # Initial clients
+        self._init_data_clients(config.get("azure_account_name"))
+
+    def _init_data_clients(self, account_name: str = None):
+        """Initializes or re-initializes blob and datalake clients for a specific account."""
+        if self.config.get("connection_string"):
+            self.client = BlobServiceClient.from_connection_string(self.config["connection_string"])
+            self.datalake_client = DataLakeServiceClient.from_connection_string(self.config["connection_string"])
+        elif account_name:
+            account_url = f"https://{account_name}.blob.core.windows.net"
+            dfs_url = f"https://{account_name}.dfs.core.windows.net"
+            self.client = BlobServiceClient(account_url, credential=self.credential)
+            self.datalake_client = DataLakeServiceClient(dfs_url, credential=self.credential)
+        else:
+            self.client = None
+            self.datalake_client = None
 
     def _init_credential(self, config: Dict[str, Any]):
         """Helper to initialize the best available credential"""
@@ -74,12 +91,29 @@ class AzureConnector(BaseConnector):
             all_files = []
             for acct in accounts:
                 try:
-                    # Update config temporarily for this account to list containers
+                    # Switch account context
+                    print(f"  📂 Switching to account: {acct['name']}", file=os.sys.stderr)
                     original_acct = self.config.get("azure_account_name")
                     self.config["azure_account_name"] = acct["name"]
+                    self._init_data_clients(acct["name"]) # IMPORTANT: Re-init data plane clients
                     
                     containers = self.list_containers(acct["name"])
                     print(f"  📦 Account {acct['name']}: Found {len(containers)} containers: {', '.join(containers)}", file=os.sys.stderr)
+                    
+                    # Add storage account entry itself to results
+                    all_files.append(FileMetadata(
+                        path=f"azure://{acct['name']}",
+                        type="storage_account",
+                        size_bytes=0,
+                        last_modified=None,
+                        source="azure",
+                        owner=acct["tags"].get("owner") or acct["tags"].get("Owner"),
+                        tags=acct["tags"],
+                        extra_metadata={
+                            "location": acct["location"],
+                            "resource_group": acct["resource_group"]
+                        }
+                    ))
                     
                     for cont in containers:
                         try:
@@ -87,8 +121,10 @@ class AzureConnector(BaseConnector):
                         except Exception as e:
                             print(f"    ❌ Error scanning container {cont} in {acct['name']}: {e}", file=os.sys.stderr)
                             
-                    # Restore original account name
+                    # Restore original account context
                     self.config["azure_account_name"] = original_acct
+                    self._init_data_clients(original_acct)
+                    self._account_metadata_cache = None # Clear cache for next account
                 except Exception as e:
                     print(f"  ❌ Error scanning account {acct['name']}: {e}", file=os.sys.stderr)
             return all_files

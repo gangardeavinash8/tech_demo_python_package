@@ -38,17 +38,46 @@ class DatabricksConnector(BaseConnector):
              print(f"Found {len(volumes)} volumes.", file=os.sys.stderr)
              
              all_files = []
-             for vol in volumes:
+             for item in volumes:
                  try:
-                     all_files.extend(self.list_objects(
-                         catalog=vol["catalog"],
-                         schema=vol["schema"],
-                         volume=vol["name"],
-                         prefix=prefix,
-                         recursive=recursive
-                     ))
+                     if item["type"] == "catalog":
+                         all_files.append(FileMetadata(
+                             path=f"databricks://{item['catalog']}",
+                             type="databricks_catalog",
+                             size_bytes=0,
+                             last_modified=None,
+                             source="databricks",
+                             owner=item["owner"]
+                         ))
+                     elif item["type"] == "schema":
+                         all_files.append(FileMetadata(
+                             path=f"databricks://{item['catalog']}/{item['schema']}",
+                             type="databricks_schema",
+                             size_bytes=0,
+                             last_modified=None,
+                             source="databricks",
+                             owner=item["owner"]
+                         ))
+                     elif item["type"] == "volume":
+                         # Add volume entry itself
+                         all_files.append(FileMetadata(
+                             path=item["full_path"],
+                             type="databricks_volume_resource",
+                             size_bytes=0,
+                             last_modified=None,
+                             source="databricks",
+                             owner=item["owner"]
+                         ))
+                         # Then scan volume contents
+                         all_files.extend(self.list_objects(
+                             catalog=item["catalog"],
+                             schema=item["schema"],
+                             volume=item["name"],
+                             prefix=prefix,
+                             recursive=recursive
+                         ))
                  except Exception as e:
-                     print(f"  ❌ Error scanning volume {vol['full_path']}: {e}", file=os.sys.stderr)
+                     print(f"  ❌ Error scanning {item['type']} {item.get('full_path', item.get('name'))}: {e}", file=os.sys.stderr)
              return all_files
 
         # Construct Volume Root Path
@@ -144,12 +173,29 @@ class DatabricksConnector(BaseConnector):
         volumes = []
         try:
             for catalog in self.client.catalogs.list():
-                # Skip system catalogs if desired, but for now scan all
+                # Add catalog entry
+                volumes.append({
+                    "type": "catalog",
+                    "name": catalog.name,
+                    "catalog": catalog.name,
+                    "owner": getattr(catalog, 'owner', None)
+                })
+                
                 try:
                     for schema in self.client.schemas.list(catalog.name):
+                        # Add schema entry
+                        volumes.append({
+                            "type": "schema",
+                            "name": schema.name,
+                            "catalog": catalog.name,
+                            "schema": schema.name,
+                            "owner": getattr(schema, 'owner', None)
+                        })
+                        
                         try:
                             for vol in self.client.volumes.list(catalog.name, schema.name):
                                 volumes.append({
+                                    "type": "volume",
                                     "name": vol.name,
                                     "catalog": catalog.name,
                                     "schema": schema.name,
