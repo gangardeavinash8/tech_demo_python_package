@@ -52,7 +52,7 @@ class S3Connector(BaseConnector):
                         size_bytes=total_bucket_size,
                         last_modified=None,
                         source="s3",
-                        owner=tags.get("owner") or tags.get("Owner"),
+                        owner=self._get_owner_from_tags(tags),
                         tags=tags,
                         extra_metadata={"region": region}
                     ))
@@ -99,8 +99,8 @@ class S3Connector(BaseConnector):
             if "Owner" in obj:
                 owner_display = obj["Owner"].get("DisplayName") or obj["Owner"].get("ID")
             
-            if not owner_display and "owner" in bucket_tags:
-                owner_display = bucket_tags["owner"]
+            if not owner_display:
+                owner_display = self._get_owner_from_tags(bucket_tags)
 
             results.append(FileMetadata(
                 path=f"s3://{target_bucket}/{obj['Key']}",
@@ -181,7 +181,7 @@ class S3Connector(BaseConnector):
             path=f"s3://{self.bucket}/{key}",
             type="file",
             size_bytes=response["ContentLength"],
-            owner=response.get("Metadata", {}).get("owner") or final_tags.get("owner") or final_tags.get("Owner") or owner_display,
+            owner=response.get("Metadata", {}).get("owner") or self._get_owner_from_tags(final_tags) or owner_display,
             last_modified=response["LastModified"],
             last_accessed=None,
             source="s3",
@@ -224,7 +224,7 @@ class S3Connector(BaseConnector):
         """Helper to get bucket tags."""
         try:
             tag_resp = self.client.get_bucket_tagging(Bucket=bucket)
-            return {t["Key"]: t["Value"] for t in tag_resp.get("TagSet", [])}
+            return {t["Key"].strip(): t["Value"] for t in tag_resp.get("TagSet", [])}
         except Exception:
             return {}
 

@@ -149,7 +149,7 @@ class AzureConnector(BaseConnector):
                             size_bytes=int(container_size),
                             last_modified=None,
                             source="azure",
-                            owner=acct["tags"].get("owner") or acct["tags"].get("Owner"),
+                            owner=self._get_owner_from_tags(acct["tags"]),
                             tags=acct["tags"]
                         ))
                         account_resources.extend(container_items)
@@ -162,7 +162,7 @@ class AzureConnector(BaseConnector):
                         size_bytes=total_acct_size,
                         last_modified=None,
                         source="azure",
-                        owner=acct["tags"].get("owner") or acct["tags"].get("Owner"),
+                        owner=self._get_owner_from_tags(acct["tags"]),
                         tags=acct["tags"],
                         extra_metadata={
                             "location": acct["location"],
@@ -240,9 +240,9 @@ class AzureConnector(BaseConnector):
                 if blob_tags:
                     final_tags.update(blob_tags)
 
-                owner = blob_tags.get('owner') or blob_tags.get('Owner') or \
-                        blob_metadata.get('owner') or blob_metadata.get('Owner') or \
-                        account_tags.get('owner') or account_tags.get('Owner')
+                owner = self._get_owner_from_tags(blob_tags) or \
+                        self._get_owner_from_tags(blob_metadata) or \
+                        self._get_owner_from_tags(account_tags)
                 
                 # Fetch POSIX owner if HNS is enabled
                 if self.datalake_client:
@@ -316,7 +316,7 @@ class AzureConnector(BaseConnector):
                     path=f"azure://{self.config['azure_account_name']}/{target_container}/{blob.name}",
                     type="directory",
                     size_bytes=folder_size,
-                    owner=folder_owner or folder_metadata.get('owner') or folder_metadata.get('Owner'),
+                    owner=folder_owner or self._get_owner_from_tags(folder_metadata),
                     last_modified=folder_modified,
                     last_accessed=None,
                     source="azure",
@@ -363,7 +363,7 @@ class AzureConnector(BaseConnector):
         if not owner or owner == '$superuser':
             try:
                 tags = blob_client.get_blob_tags()
-                owner = tags.get('owner') or tags.get('Owner') or owner
+                owner = self._get_owner_from_tags(tags) or owner
             except Exception:
                 pass
         
@@ -375,7 +375,7 @@ class AzureConnector(BaseConnector):
                 container_props = container_client.get_container_properties()
                 # Check for 'owner' or 'Owner' in metadata
                 meta = container_props.metadata or {}
-                owner = meta.get('owner') or meta.get('Owner') or owner
+                owner = self._get_owner_from_tags(meta) or owner
             except Exception:
                 pass
 
@@ -395,7 +395,7 @@ class AzureConnector(BaseConnector):
             account_props = account_meta.get('management_properties') or {}
             
             if not owner or owner == '$superuser':
-                owner = account_tags.get('owner') or account_tags.get('Owner') or owner
+                owner = self._get_owner_from_tags(account_tags) or owner
         except Exception:
             pass
             

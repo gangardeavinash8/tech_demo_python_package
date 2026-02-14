@@ -6,6 +6,19 @@ class BaseConnector(ABC):
     def __init__(self, config: Dict[str, Any]):
         self.config = config
 
+    def _get_owner_from_tags(self, tags: Dict[str, str]) -> str:
+        """
+        Helper to robustly extract owner from tags, handling case sensitivity and whitespace.
+        Looks for keys like "owner", "Owner", "owner ", " owner", etc.
+        """
+        if not tags:
+            return None
+        
+        for k, v in tags.items():
+            if k.strip().lower() == "owner":
+                return v
+        return None
+
     @abstractmethod
     def list_objects(self, prefix: str = "", recursive: bool = True) -> List[FileMetadata]:
         pass

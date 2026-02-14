@@ -1,6 +1,6 @@
 [project]
 name = "metadata_reader"
-version = "0.3.15"
+version = "0.3.16"
 description = "A unified metadata reader for various cloud storage providers."
 dependencies = ["boto3", "azure-storage-blob", "azure-storage-file-datalake", "azure-mgmt-storage", "azure-mgmt-authorization", "azure-identity", "databricks-sdk", "requests", "python-dotenv"]
 requires-python = ">=3.8"
