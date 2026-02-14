@@ -26,8 +26,13 @@ class AzureConnector(BaseConnector):
             
             self.client = BlobServiceClient(account_url, credential=self.credential)
             self.datalake_client = DataLakeServiceClient(dfs_url, credential=self.credential)
+        elif config.get("azure_subscription_id"):
+            # Discovery-only mode
+            self._init_credential(config)
+            self.client = None
+            self.datalake_client = None
         else:
-            raise ValueError("Either AZURE_CONNECTION_STRING or AZURE_ACCOUNT_NAME+Credentials must be provided.")
+            raise ValueError("Either AZURE_CONNECTION_STRING, AZURE_ACCOUNT_NAME, or AZURE_SUBSCRIPTION_ID (for discovery) must be provided.")
 
         if self.container:
             self.file_system_client = self.datalake_client.get_file_system_client(self.container)
@@ -38,6 +43,8 @@ class AzureConnector(BaseConnector):
         self.mgmt_client = None
         if config.get("azure_subscription_id") and self.credential:
             self.mgmt_client = StorageManagementClient(self.credential, config["azure_subscription_id"])
+            
+        self._account_metadata_cache = None
 
     def _init_credential(self, config: Dict[str, Any]):
         """Helper to initialize the best available credential"""
@@ -73,19 +80,88 @@ class AzureConnector(BaseConnector):
         except Exception:
             pass
 
-        # name_starts_with acts as a prefix filter
-        for blob in container_client.list_blobs(name_starts_with=prefix):
-            results.append(FileMetadata(
-                path=f"azure://{target_container}/{blob.name}",
-                type="file", # Blobs are files
-                size_bytes=blob.size,
-                owner=account_tags.get('owner') or account_tags.get('Owner'), # Fallback to account owner
-                last_modified=blob.last_modified,
-                last_accessed=blob.last_accessed_on,
-                source="blob_storage",
-                tags=account_tags,  # Apply account level tags to file
-                extra_metadata=account_props # Include detailed account props
-            ))
+        # Use walk_blobs with delimiter to get immediate children (files and prefixes)
+        # Optimization: Include metadata in the initial listing
+        # Avoid including 'tags' as it requires higher permissions (Data Owner) that may be missing
+        try:
+            blobs = container_client.walk_blobs(name_starts_with=prefix, delimiter='/', include=['metadata'])
+        except Exception:
+            # Fallback to no-include if metadata access is restricted
+            blobs = container_client.walk_blobs(name_starts_with=prefix, delimiter='/')
+
+        for blob in blobs:
+            if hasattr(blob, 'size'):
+                # Regular Blob
+                blob_metadata = getattr(blob, 'metadata', {}) or {}
+                owner = blob_metadata.get('owner') or blob_metadata.get('Owner') or \
+                        account_tags.get('owner') or account_tags.get('Owner')
+                
+                # Fetch POSIX owner if HNS is enabled
+                if self.datalake_client:
+                    try:
+                        fs_client = self.datalake_client.get_file_system_client(target_container)
+                        f_client = fs_client.get_file_client(blob.name)
+                        acl = f_client.get_access_control()
+                        owner = acl.get('owner') or owner
+                    except Exception:
+                        pass
+
+                results.append(FileMetadata(
+                    path=f"azure://{target_container}/{blob.name}",
+                    type="file",
+                    size_bytes=blob.size,
+                    owner=owner,
+                    last_modified=blob.last_modified,
+                    source="blob_storage",
+                    etag=getattr(blob, 'etag', None),
+                    tags=account_tags
+                ))
+            else:
+                # BlobPrefix (Directory)
+                folder_size = self._calculate_folder_size(blob.name, target_container)
+                # Fetch directory properties if datalake client is available
+                folder_modified = None
+                folder_metadata = {}
+                folder_tags = account_tags.copy()
+                folder_owner = None
+                
+                if self.datalake_client:
+                    try:
+                        # Ensure we have a file system client for this container
+                        fs_client = self.datalake_client.get_file_system_client(target_container)
+                        dir_client = fs_client.get_directory_client(blob.name.rstrip('/'))
+                        dir_props = dir_client.get_directory_properties()
+                        folder_modified = dir_props.last_modified
+                        folder_metadata = dir_props.metadata or {}
+                        
+                        # Fetch POSIX owner
+                        try:
+                            acl = dir_client.get_access_control()
+                            folder_owner = acl.get('owner')
+                        except Exception:
+                            pass
+
+                        # Try to fetch tags via Blob API for the directory path
+                        try:
+                            temp_blob_client = container_client.get_blob_client(blob.name.rstrip('/'))
+                            tags = temp_blob_client.get_blob_tags()
+                            if tags:
+                                folder_tags.update(tags)
+                        except Exception:
+                            pass
+                    except Exception:
+                        # Directory might not be a real object (non-HNS)
+                        pass
+
+                results.append(FileMetadata(
+                    path=f"azure://{target_container}/{blob.name}",
+                    type="directory",
+                    size_bytes=folder_size,
+                    owner=folder_owner or folder_metadata.get('owner') or folder_metadata.get('Owner'),
+                    last_modified=folder_modified,
+                    source="blob_storage",
+                    tags=folder_tags
+                ))
 
         return results
 
@@ -115,15 +191,13 @@ class AzureConnector(BaseConnector):
         blob_client = self.client.get_blob_client(container=self.container, blob=blob_name)
         props = blob_client.get_blob_properties()
         
-        # Try to fetch owner using DataLake client (requires HNS)
+        # Try to fetch owner using DataLake client if possible (HNS), but avoid fetching full ACL
         owner = None
         try:
-            file_client = self.file_system_client.get_file_client(blob_name)
-            acl = file_client.get_access_control()
-            owner = acl.get('owner')
+             # We skip get_access_control() as per request to not fetch access control
+             pass
         except Exception:
-            # Fallback if HNS is not enabled or ACLs are inaccessible
-            pass
+             pass
         
         # Priority 2: Check Blob Tags (Index Tags)
         if not owner or owner == '$superuser':
@@ -190,27 +264,35 @@ class AzureConnector(BaseConnector):
             "etag": props.etag,
             "lease_status": props.lease.status,
             "lease_state": props.lease.state,
-            "public_access": props.public_access,
             "metadata": props.metadata,
             "source": "azure"
         }
 
     def get_account_metadata(self) -> Dict[str, Any]:
+        if self._account_metadata_cache:
+            return self._account_metadata_cache
+
         info = {}
         try:
             info = self.client.get_account_information()
         except Exception as e:
             print(f"Warning: Data Plane access failed (check RBAC roles): {e}")
         
-        tags = {}
+        tags = self.config.get("azure_account_tags") or {}
         mgmt_props = {}
-        if self.mgmt_client and self.config.get("azure_resource_group") and self.config.get("azure_account_name"):
+        
+        # Determine resource group and account name
+        rg = self.config.get("azure_resource_group")
+        account_name = self.config.get("azure_account_name")
+
+        if self.mgmt_client and rg and account_name:
             try:
-                account = self.mgmt_client.storage_accounts.get_properties(
-                    self.config["azure_resource_group"],
-                    self.config["azure_account_name"]
-                )
-                tags = account.tags or {}
+                account = self.mgmt_client.storage_accounts.get_properties(rg, account_name)
+                # Merge management plane tags with any passed-in tags
+                if account.tags:
+                    new_tags = account.tags.copy()
+                    new_tags.update(tags)
+                    tags = new_tags
                 
                 mgmt_props = {
                     "location": account.location,
@@ -221,9 +303,9 @@ class AzureConnector(BaseConnector):
                     "primary_endpoints": account.primary_endpoints.as_dict() if account.primary_endpoints else None
                 }
             except Exception as e:
-                print(f"Warning: Failed to fetch account tags/props: {e}")
+                print(f"Warning: Failed to fetch account tags/props for {account_name} in {rg}: {e}")
 
-        return {
+        self._account_metadata_cache = {
             "sku_name": info.get('sku_name'),
             "account_kind": info.get('account_kind'),
             "is_hns_enabled": info.get('is_hns_enabled'),
@@ -231,6 +313,66 @@ class AzureConnector(BaseConnector):
             "management_properties": mgmt_props,
             "source": "azure"
         }
+        return self._account_metadata_cache
+
+    def _calculate_folder_size(self, prefix: str, container: str = None) -> int:
+        """Calculates total size of a folder by traversing its contents."""
+        target_container = container or self.container
+        if not target_container: return 0
+        container_client = self.client.get_container_client(target_container)
+        total_size = 0
+        try:
+            for blob in container_client.list_blobs(name_starts_with=prefix):
+                 total_size += blob.size
+        except Exception:
+            pass
+        return total_size
+
+    def list_storage_accounts(self) -> List[Dict[str, Any]]:
+        """Lists all storage accounts with their metadata."""
+        if not self.mgmt_client:
+            raise ValueError("Management client not initialized. Ensure subscription_id and credentials are provided.")
+        
+        accounts = []
+        try:
+            for account in self.mgmt_client.storage_accounts.list():
+                # Extact Resource Group from ID
+                # ID format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Storage/storageAccounts/{name}
+                rg = "unknown"
+                if account.id and "/resourceGroups/" in account.id:
+                    rg = account.id.split("/resourceGroups/")[1].split("/")[0]
+                
+                accounts.append({
+                    "name": account.name,
+                    "resource_group": rg,
+                    "tags": account.tags or {},
+                    "location": account.location
+                })
+        except Exception as e:
+            print(f"Error listing storage accounts: {e}")
+            
+        return accounts
+
+    def list_containers(self, account_name: str = None) -> List[str]:
+        """Lists all containers in a storage account. Requires Data Plane access."""
+        # Note: This requires full BlobServiceClient for the specific account
+        # If account_name is provided, we might need a temporary client
+        client = self.client
+        if account_name and account_name != self.config.get("azure_account_name"):
+             account_url = f"https://{account_name}.blob.core.windows.net"
+             client = BlobServiceClient(account_url, credential=self.credential)
+             
+        if not client:
+             return []
+             
+        containers = []
+        try:
+            for container in client.list_containers():
+                containers.append(container.name)
+        except Exception as e:
+            print(f"Error listing containers: {e}")
+            
+        return containers
 
 class AzureConnectorBuilder:
     def __init__(self):
@@ -268,7 +410,13 @@ class AzureConnectorBuilder:
         self._config["azure_account_name"] = account_name
         return self
 
+    def account_tags(self, tags: Dict[str, str]):
+        self._config["azure_account_tags"] = tags
+        return self
+
     def build(self) -> AzureConnector:
-        if not self._config.get("connection_string") and not self._config.get("azure_account_name"):
-            raise ValueError("Either Azure Connection String or Account Name must be provided.")
+        if not any([self._config.get("connection_string"), 
+                   self._config.get("azure_account_name"),
+                   self._config.get("azure_subscription_id")]):
+            raise ValueError("Azure Connection String, Account Name, or Subscription ID must be provided.")
         return AzureConnector(self._config)

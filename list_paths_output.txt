@@ -1,0 +1,2 @@
+--- Listing Paths in demodata ---
+Failed to list paths: 'FileSystemClient' object has no attribute 'list_paths'

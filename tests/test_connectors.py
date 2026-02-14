@@ -36,6 +36,7 @@ class TestConnectors(unittest.TestCase):
         self.assertEqual(results[0].path, "s3://test-bucket/test_file.txt")
         self.assertEqual(results[0].size_bytes, 1024)
         self.assertEqual(results[0].source, "s3")
+        self.assertNotIn("access_control", results[0].extra_metadata)
 
     @patch("azure.storage.blob.BlobServiceClient.from_connection_string")
     def test_azure_connector(self, mock_service_client):
@@ -51,7 +52,7 @@ class TestConnectors(unittest.TestCase):
         mock_blob.last_modified = datetime(2023, 1, 2)
         mock_blob.last_accessed_on = datetime(2023, 1, 3)
         
-        mock_container_client.list_blobs.return_value = [mock_blob]
+        mock_container_client.walk_blobs.return_value = [mock_blob]
 
         config = {
             "connection_string": "DefaultEndpointsProtocol=https;AccountName=test;AccountKey=test;",
@@ -64,6 +65,7 @@ class TestConnectors(unittest.TestCase):
         self.assertEqual(results[0].path, "azure://test-container/test_blob.txt")
         self.assertEqual(results[0].size_bytes, 2048)
         self.assertEqual(results[0].source, "blob_storage")
+        self.assertNotIn("access_control", results[0].extra_metadata)
 
     @patch("metadata_reader.connectors.databricks.WorkspaceClient")
     def test_databricks_connector(self, mock_ws_client):
@@ -84,9 +86,9 @@ class TestConnectors(unittest.TestCase):
             "databricks_token": "test-token"
         }
         connector = DatabricksConnector(config)
-        results = connector.list_objects(prefix="/test")
+        results = connector.list_objects(prefix="dbfs:/test")
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].path, "dbfs:/test/file.txt")
         self.assertEqual(results[0].size_bytes, 512)
-        self.assertEqual(results[0].source, "databricks")
+        self.assertEqual(results[0].source, "databricks_dbfs")

@@ -1,5 +1,6 @@
 from typing import List, Dict, Any
 import requests
+import os
 from azure.identity import ClientSecretCredential
 from .base import BaseConnector
 from ..models.metadata import FileMetadata
@@ -106,26 +107,15 @@ class SharePointConnector(BaseConnector):
                 if "file" in item:
                     results.append(self._map_item_to_metadata(item, site_id, drive_id))
                 elif "folder" in item:
-                    # Basic recursion
-                    child_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/{item['id']}/children"
-                    self._fetch_children(child_url, headers, site_id, drive_id, results)
+                    # Calculate folder size via traversal
+                    folder_size = self._calculate_folder_size(item['id'], headers, site_id, drive_id)
+                    results.append(self._map_item_to_metadata(item, site_id, drive_id, folder_size_override=folder_size))
             
             url = data.get("@odata.nextLink")
 
-    def _map_item_to_metadata(self, item: Dict[str, Any], site_id: str, drive_id: str) -> FileMetadata:
+    def _map_item_to_metadata(self, item: Dict[str, Any], site_id: str, drive_id: str, folder_size_override: int = None) -> FileMetadata:
         # Map Graph API Item to FileMetadata
         user = item.get("createdBy", {}).get("user", {}).get("displayName")
-        
-        # Extra metadata
-        extra = {
-            "site_id": site_id,
-            "drive_id": drive_id,
-            "item_id": item["id"],
-            "web_url": item.get("webUrl"),
-            "created_by": item.get("createdBy"),
-            "last_modified_by": item.get("lastModifiedBy")
-        }
-
         
         # Parse date string to datetime object
         last_modified = None
@@ -140,14 +130,12 @@ class SharePointConnector(BaseConnector):
 
         return FileMetadata(
             path=f"sharepoint://{site_id}/{drive_id}/{item.get('name')}",
-            type="file",
-            size_bytes=item.get("size", 0),
+            type="directory" if "folder" in item else "file",
+            size_bytes=folder_size_override if folder_size_override is not None else item.get("size", 0),
             last_modified=last_modified, 
             source="sharepoint",
             owner=user,
-            content_type=item.get("file", {}).get("mimeType"),
-            etag=item.get("eTag"),
-            extra_metadata=extra
+            etag=item.get("eTag")
         )
 
     def read_file(self, path: str) -> bytes:
@@ -164,6 +152,30 @@ class SharePointConnector(BaseConnector):
 
     def get_account_metadata(self) -> Dict[str, Any]:
          return {"source": "sharepoint", "tenant_id": self.tenant_id}
+
+    def _calculate_folder_size(self, item_id: str, headers: Dict[str, str], site_id: str, drive_id: str) -> int:
+        """Calculates total size of a folder by traversing its contents."""
+        total_size = 0
+        url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/{item_id}/children"
+        
+        while url:
+            try:
+                response = requests.get(url, headers=headers)
+                if response.status_code != 200:
+                    break
+                data = response.json()
+                items = data.get("value", [])
+                for item in items:
+                    if "file" in item:
+                        total_size += item.get("size", 0)
+                    elif "folder" in item:
+                        total_size += self._calculate_folder_size(item['id'], headers, site_id, drive_id)
+                
+                url = data.get("@odata.nextLink")
+            except Exception:
+                break
+            
+        return total_size
 
 class SharePointConnectorBuilder:
     def __init__(self):

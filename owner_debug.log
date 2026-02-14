@@ -1,0 +1,17 @@
+/Users/as-mac-0562/Library/Python/3.9/lib/python/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/as-mac-0562/Library/Python/3.9/lib/python/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+--- Listing Volumes in fetch_databricks_metadata.default ---
+Volume Name: raw_volume
+Attributes: ['__annotations__', '__class__', '__dataclass_fields__', '__dataclass_params__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', 'access_point', 'as_dict', 'as_shallow_dict', 'browse_only', 'catalog_name', 'comment', 'created_at', 'created_by', 'encryption_details', 'from_dict', 'full_name', 'metastore_id', 'name', 'owner', 'schema_name', 'storage_location', 'updated_at', 'updated_by', 'volume_id', 'volume_type']
+owner: avinashgangarde@avi4050.onmicrosoft.com
+created_by: avinashgangarde@avi4050.onmicrosoft.com
+updated_by: avinashgangarde@avi4050.onmicrosoft.com
+
+--- Checking File Entries in /Volumes/fetch_databricks_metadata/default/raw_volume ---
+Item Name: raw_sales_data.csv
+Attributes: ['__annotations__', '__class__', '__dataclass_fields__', '__dataclass_params__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', 'as_dict', 'as_shallow_dict', 'file_size', 'from_dict', 'is_directory', 'last_modified', 'name', 'path']
+owner: Not found
+created_by: Not found
+last_modified_by: Not found

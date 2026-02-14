@@ -1,4 +1,5 @@
 import boto3
+import os
 from typing import List, Dict, Any
 from .base import BaseConnector
 from ..models.metadata import FileMetadata
@@ -6,7 +7,7 @@ from ..models.metadata import FileMetadata
 class S3Connector(BaseConnector):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.bucket = config["bucket"]
+        self.bucket = config.get("bucket")
         self.client = boto3.client(
             "s3",
             aws_access_key_id=config.get("aws_access_key_id"),
@@ -27,18 +28,31 @@ class S3Connector(BaseConnector):
         except Exception:
             pass
 
-        access_control = self._get_bucket_permissions(target_bucket)
 
-        # FetchOwner=True is required to get valid Owner info in the response
+        # Use Delimiter to avoid recursion
         try:
-            response = self.client.list_objects_v2(Bucket=target_bucket, Prefix=prefix, FetchOwner=True)
+            response = self.client.list_objects_v2(
+                Bucket=target_bucket, 
+                Prefix=prefix, 
+                Delimiter='/',
+                FetchOwner=True
+            )
         except Exception:
             # Fallback if FetchOwner is not supported or permission denied
-            response = self.client.list_objects_v2(Bucket=target_bucket, Prefix=prefix)
+            response = self.client.list_objects_v2(
+                Bucket=target_bucket, 
+                Prefix=prefix,
+                Delimiter='/'
+            )
             
         results = []
 
+        # Files
         for obj in response.get("Contents", []):
+            # Skip the prefix itself if it appears in the results
+            if obj['Key'] == prefix:
+                continue
+
             owner_display = None
             if "Owner" in obj:
                 owner_display = obj["Owner"].get("DisplayName") or obj["Owner"].get("ID")
@@ -54,12 +68,22 @@ class S3Connector(BaseConnector):
                 last_modified=obj["LastModified"],
                 last_accessed=None, 
                 source="s3",
-                tags=bucket_tags, 
-                extra_metadata={
-                    "storage_class": obj.get("storage_class"),
-                    "etag": obj.get("ETag"),
-                    "access_control": access_control
-                }
+                tags=bucket_tags,
+                etag=obj.get("ETag")
+            ))
+
+        # Folders (CommonPrefixes)
+        for cp in response.get("CommonPrefixes", []):
+            folder_key = cp["Prefix"]
+            folder_size = self._calculate_folder_size(folder_key, target_bucket)
+            results.append(FileMetadata(
+                path=f"s3://{target_bucket}/{folder_key}",
+                type="directory",
+                size_bytes=folder_size,
+                owner=None, # Folders don't have explicit owners in S3 listings usually
+                last_modified=None,
+                source="s3",
+                tags=bucket_tags
             ))
 
         return results
@@ -84,7 +108,6 @@ class S3Connector(BaseConnector):
         except Exception:
             pass
             
-        access_control = self._get_bucket_permissions(self.bucket)
 
         # Try to get object tagging
         tags = bucket_tags.copy()
@@ -117,8 +140,7 @@ class S3Connector(BaseConnector):
             extra_metadata={
                 "storage_class": response.get("StorageClass"),
                 "version_id": response.get("VersionId"),
-                "metadata": response.get("Metadata"),
-                "access_control": access_control
+                "metadata": response.get("Metadata")
             }
         )
 
@@ -135,40 +157,22 @@ class S3Connector(BaseConnector):
         return {
             "name": target_bucket,
             "region": region,
-            "source": "s3",
-            "access_control": self._get_bucket_permissions(target_bucket)
+            "source": "s3"
         }
 
-    def _get_bucket_permissions(self, bucket: str = None) -> Dict[str, Any]:
+    def _calculate_folder_size(self, prefix: str, bucket: str = None) -> int:
+        """Calculates total size of a folder by traversing its contents."""
         target_bucket = bucket or self.bucket
-        permissions = {"policy": None, "acl": None}
+        total_size = 0
+        paginator = self.client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=target_bucket, Prefix=prefix)
         
-        # Get Bucket Policy
-        try:
-            policy_resp = self.client.get_bucket_policy(Bucket=target_bucket)
-            permissions["policy"] = policy_resp.get("Policy")
-        except Exception:
-            # Policy might not exist or permission denied
-            pass
-            
-        # Get Bucket ACL
-        try:
-            acl_resp = self.client.get_bucket_acl(Bucket=target_bucket)
-            grants = []
-            for grant in acl_resp.get("Grants", []):
-                grantee = grant.get("Grantee", {})
-                grants.append({
-                    "grantee_type": grantee.get("Type"),
-                    "display_name": grantee.get("DisplayName"),
-                    "id": grantee.get("ID"),
-                    "uri": grantee.get("URI"),
-                    "permission": grant.get("Permission")
-                })
-            permissions["acl"] = grants
-        except Exception:
-            pass
-            
-        return permissions
+        for page in pages:
+            for obj in page.get('Contents', []):
+                total_size += obj['Size']
+        
+        return total_size
+
 
     def get_account_metadata(self) -> Dict[str, Any]:
         """Returns metadata about the AWS Account (Caller)."""
