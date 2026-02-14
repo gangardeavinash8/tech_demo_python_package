@@ -15,10 +15,31 @@ class S3Connector(BaseConnector):
             region_name=config.get("region")
         )
 
+    def list_buckets(self) -> List[str]:
+        """Lists all buckets accessible to the credentials."""
+        try:
+            response = self.client.list_buckets()
+            return [b["Name"] for b in response.get("Buckets", [])]
+        except Exception as e:
+            print(f"Error listing S3 buckets: {e}")
+            return []
+
     def list_objects(self, prefix: str = "", bucket: str = None) -> List[FileMetadata]:
         target_bucket = bucket or self.bucket
+        
+        # Discovery Mode: If no bucket is specified, scan all accessible buckets
         if not target_bucket:
-             raise ValueError("Bucket not configured and no override provided.")
+            print("🔍 Discovering accessible S3 Buckets...", file=os.sys.stderr)
+            buckets = self.list_buckets()
+            print(f"Found {len(buckets)} buckets: {', '.join(buckets)}", file=os.sys.stderr)
+            
+            all_files = []
+            for b in buckets:
+                try:
+                    all_files.extend(self.list_objects(prefix=prefix, bucket=b))
+                except Exception as e:
+                    print(f" ❌ Error scanning bucket {b}: {e}", file=os.sys.stderr)
+            return all_files
 
         # Fetch Context Data (Tags, Permissions, Users)
         bucket_tags = {}

@@ -36,8 +36,6 @@ def main():
     
     # 1. AWS S3
     if os.getenv("AWS_ACCESS_KEY_ID"):
-        # Support comma-separated buckets
-        buckets = os.getenv("S3_BUCKET", "").split(",")
         try:
             s3_conn = s3_builder() \
                 .access_key_id(os.getenv("AWS_ACCESS_KEY_ID")) \
@@ -45,17 +43,36 @@ def main():
                 .region(os.getenv("AWS_REGION")) \
                 .build()
             
-            for bucket in buckets:
-                bucket = bucket.strip()
-                if not bucket: continue
-                try:
-                    print(f"📦 Scanning S3 Bucket: {bucket}", file=sys.stderr)
-                    files = s3_conn.list_objects(bucket=bucket)
-                    all_metadata.extend(files)
-                    add_to_summary("AWS S3", bucket, len(files))
-                except Exception as e:
-                    print(f" ❌ Error scanning S3 bucket {bucket}: {e}", file=sys.stderr)
-                    add_to_summary("AWS S3", bucket, 0, f"Error: {str(e)[:50]}...")
+            # Support discovery vs explicit buckets
+            config_buckets = os.getenv("S3_BUCKET")
+            if config_buckets:
+                buckets = [b.strip() for b in config_buckets.split(",") if b.strip()]
+                for bucket in buckets:
+                    try:
+                        print(f"📦 Scanning S3 Bucket: {bucket}", file=sys.stderr)
+                        files = s3_conn.list_objects(bucket=bucket)
+                        all_metadata.extend(files)
+                        add_to_summary("AWS S3", bucket, len(files))
+                    except Exception as e:
+                        print(f" ❌ Error scanning S3 bucket {bucket}: {e}", file=sys.stderr)
+                        add_to_summary("AWS S3", bucket, 0, f"Error: {str(e)[:50]}...")
+            else:
+                # Discovery Mode
+                print("🔍 Using S3 Discovery Mode...", file=sys.stderr)
+                files = s3_conn.list_objects()
+                all_metadata.extend(files)
+                # Group results by bucket for the summary
+                bucket_counts = {}
+                for f in files:
+                    b_name = f.path.split("/")[2] if f.path.startswith("s3://") else "Unknown"
+                    bucket_counts[b_name] = bucket_counts.get(b_name, 0) + 1
+                
+                for b_name, count in bucket_counts.items():
+                    add_to_summary("AWS S3 (Discovery)", b_name, count)
+                
+                if not files:
+                    add_to_summary("AWS S3 (Discovery)", "None Found", 0)
+
         except Exception as e:
             print(f" ❌ S3 Builder failed: {e}", file=sys.stderr)
 

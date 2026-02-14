@@ -6,7 +6,7 @@ dependencies = ["boto3", "azure-storage-blob", "azure-storage-file-datalake", "a
 requires-python = ">=3.8"
 
 [tool.setuptools]
-packages = ["metadata_reader"]
+packages = {find = {include = ["metadata_reader*"]}}
 
 [build-system]
 requires = ["setuptools>=42", "wheel"]
