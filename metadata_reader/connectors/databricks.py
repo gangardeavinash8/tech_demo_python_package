@@ -20,7 +20,7 @@ class DatabricksConnector(BaseConnector):
              
         self.client = WorkspaceClient(host=self.host, token=self.token)
 
-    def list_objects(self, prefix: str = "", catalog: str = None, schema: str = None, volume: str = None) -> List[FileMetadata]:
+    def list_objects(self, prefix: str = "", catalog: str = None, schema: str = None, volume: str = None, recursive: bool = True) -> List[FileMetadata]:
         """
         Lists files from the configured Unity Catalog Volume.
         Path format: /Volumes/catalog/schema/volume
@@ -69,14 +69,14 @@ class DatabricksConnector(BaseConnector):
                 pass
 
         try:
-            # Recursive listing helper for children
-            self._fetch_volume_files(search_path, results)
+            # Listing helper for children
+            self._fetch_volume_files(search_path, results, recursive=recursive)
         except Exception as e:
              print(f"Error listing Databricks path {search_path}: {e}")
              
         return results
 
-    def _fetch_volume_files(self, path: str, results: List[FileMetadata]):
+    def _fetch_volume_files(self, path: str, results: List[FileMetadata], recursive: bool = True):
         # Databricks SDK for Files API (Unity Catalog Volumes)
         # client.files.list_directory_contents(path)
         try:
@@ -97,6 +97,9 @@ class DatabricksConnector(BaseConnector):
                         source="databricks_volume",
                         owner=self.owner
                     ))
+                    
+                    if recursive:
+                        self._fetch_volume_files(item.path, results, recursive=True)
                 else:
                     # modification_time might be missing or named differently
                     mod_time = None

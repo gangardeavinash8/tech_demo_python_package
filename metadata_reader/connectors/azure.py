@@ -61,7 +61,7 @@ class AzureConnector(BaseConnector):
             # Fallback to Environment Variables / Managed Identity
             self.credential = DefaultAzureCredential()
 
-    def list_objects(self, prefix: str = "", container: str = None) -> List[FileMetadata]:
+    def list_objects(self, prefix: str = "", container: str = None, recursive: bool = True) -> List[FileMetadata]:
         target_container = container or self.container
         if not target_container:
             raise ValueError("Container not configured and no override provided.")
@@ -80,14 +80,23 @@ class AzureConnector(BaseConnector):
         except Exception:
             pass
 
-        # Use walk_blobs with delimiter to get immediate children (files and prefixes)
+        # Use walk_blobs to get files and prefixes
         # Optimization: Include metadata in the initial listing
         # Avoid including 'tags' as it requires higher permissions (Data Owner) that may be missing
+        walk_args = {
+            "name_starts_with": prefix,
+            "include": ['metadata']
+        }
+        if not recursive:
+            walk_args["delimiter"] = '/'
+
         try:
-            blobs = container_client.walk_blobs(name_starts_with=prefix, delimiter='/', include=['metadata'])
+            blobs = container_client.walk_blobs(**walk_args)
         except Exception:
             # Fallback to no-include if metadata access is restricted
-            blobs = container_client.walk_blobs(name_starts_with=prefix, delimiter='/')
+            if "include" in walk_args:
+                del walk_args["include"]
+            blobs = container_client.walk_blobs(**walk_args)
 
         for blob in blobs:
             if hasattr(blob, 'size'):

@@ -7,7 +7,7 @@ class BaseConnector(ABC):
         self.config = config
 
     @abstractmethod
-    def list_objects(self, prefix: str = "") -> List[FileMetadata]:
+    def list_objects(self, prefix: str = "", recursive: bool = True) -> List[FileMetadata]:
         pass
 
     @abstractmethod

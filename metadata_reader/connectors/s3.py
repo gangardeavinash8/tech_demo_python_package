@@ -24,7 +24,7 @@ class S3Connector(BaseConnector):
             print(f"Error listing S3 buckets: {e}")
             return []
 
-    def list_objects(self, prefix: str = "", bucket: str = None) -> List[FileMetadata]:
+    def list_objects(self, prefix: str = "", bucket: str = None, recursive: bool = True) -> List[FileMetadata]:
         target_bucket = bucket or self.bucket
         
         # Discovery Mode: If no bucket is specified, scan all accessible buckets
@@ -50,21 +50,22 @@ class S3Connector(BaseConnector):
             pass
 
 
-        # Use Delimiter to avoid recursion
+        # Use Delimiter to avoid recursion if requested
+        list_args = {
+            "Bucket": target_bucket,
+            "Prefix": prefix,
+            "FetchOwner": True
+        }
+        if not recursive:
+            list_args["Delimiter"] = '/'
+
         try:
-            response = self.client.list_objects_v2(
-                Bucket=target_bucket, 
-                Prefix=prefix, 
-                Delimiter='/',
-                FetchOwner=True
-            )
+            response = self.client.list_objects_v2(**list_args)
         except Exception:
             # Fallback if FetchOwner is not supported or permission denied
-            response = self.client.list_objects_v2(
-                Bucket=target_bucket, 
-                Prefix=prefix,
-                Delimiter='/'
-            )
+            if "FetchOwner" in list_args:
+                del list_args["FetchOwner"]
+            response = self.client.list_objects_v2(**list_args)
             
         results = []
 
