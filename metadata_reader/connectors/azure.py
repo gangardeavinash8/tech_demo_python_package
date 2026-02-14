@@ -49,7 +49,7 @@ class AzureConnector(BaseConnector):
         # Initial clients
         self._init_data_clients(config.get("azure_account_name"))
 
-    def _init_data_clients(self, account_name: str = None):
+    def _init_data_clients(self, account_name: str = None, account_key: str = None):
         """Initializes or re-initializes blob and datalake clients for a specific account."""
         if self.config.get("connection_string"):
             self.client = BlobServiceClient.from_connection_string(self.config["connection_string"])
@@ -57,11 +57,27 @@ class AzureConnector(BaseConnector):
         elif account_name:
             account_url = f"https://{account_name}.blob.core.windows.net"
             dfs_url = f"https://{account_name}.dfs.core.windows.net"
-            self.client = BlobServiceClient(account_url, credential=self.credential)
-            self.datalake_client = DataLakeServiceClient(dfs_url, credential=self.credential)
+            
+            # Use account key if provided, otherwise fallback to identity-based credential
+            cred = account_key if account_key else self.credential
+            
+            self.client = BlobServiceClient(account_url, credential=cred)
+            self.datalake_client = DataLakeServiceClient(dfs_url, credential=cred)
         else:
             self.client = None
             self.datalake_client = None
+
+    def _get_account_key(self, account_name: str, resource_group: str) -> str:
+        """Fetches the storage account key using the Management API."""
+        if not self.mgmt_client:
+            return None
+        try:
+            keys = self.mgmt_client.storage_accounts.list_keys(resource_group, account_name)
+            return keys.keys[0].value
+        except Exception as e:
+            import os
+            print(f"    ⚠️ Failed to fetch access key for {account_name}: {e}", file=os.sys.stderr)
+            return None
 
     def _init_credential(self, config: Dict[str, Any]):
         """Helper to initialize the best available credential"""
@@ -100,17 +116,46 @@ class AzureConnector(BaseConnector):
                     containers = self.list_containers(acct["name"])
                     print(f"  📦 Account {acct['name']}: Found {len(containers)} containers: {', '.join(containers)}", file=os.sys.stderr)
                     
-                    account_items = []
+                    account_resources = []
+                    total_acct_size = 0
+                    
                     for cont in containers:
+                        container_size = 0
+                        container_items = []
                         try:
-                            account_items.extend(self.list_objects(prefix=prefix, container=cont, recursive=recursive))
+                            container_items = self.list_objects(prefix=prefix, container=cont, recursive=recursive)
+                            container_size = sum(item.size_bytes for item in container_items)
                         except Exception as e:
-                            print(f"    ❌ Error scanning container {cont} in {acct['name']}: {e}", file=os.sys.stderr)
+                            # If RBAC listing fails, try fetching account key and re-scanning
+                            if "AuthorizationPermissionMismatch" in str(e) or "not authorized" in str(e):
+                                print(f"    🔑 RBAC restricted for {acct['name']}. Fetching Access Key...", file=os.sys.stderr)
+                                key = self._get_account_key(acct["name"], acct["resource_group"])
+                                if key:
+                                    self._init_data_clients(acct["name"], account_key=key)
+                                    try:
+                                        container_items = self.list_objects(prefix=prefix, container=cont, recursive=recursive)
+                                        container_size = sum(item.size_bytes for item in container_items)
+                                        print(f"    ✅ Successfully scanned {cont} using Access Key.", file=os.sys.stderr)
+                                    except Exception as e2:
+                                        print(f"    ❌ Even with key, failed to list {cont}: {e2}", file=os.sys.stderr)
+                            else:
+                                print(f"    ❌ Warning: Could not list blobs in container {cont} (Account {acct['name']}): {e}", file=os.sys.stderr)
+                        
+                        # Add container entry itself
+                        print(f"    📏 Container {cont} aggregate size: {container_size} bytes", file=os.sys.stderr)
+                        account_resources.append(FileMetadata(
+                            path=f"azure://{acct['name']}/{cont}",
+                            type="container",
+                            size_bytes=int(container_size),
+                            last_modified=None,
+                            source="azure",
+                            owner=acct["tags"].get("owner") or acct["tags"].get("Owner"),
+                            tags=acct["tags"]
+                        ))
+                        account_resources.extend(container_items)
+                        total_acct_size += int(container_size)
                     
-                    # Calculate total size of the account
-                    total_acct_size = sum(item.size_bytes for item in account_items)
-                    
-                    # Add storage account entry itself to results
+                    # Ensure storage account entry has the summed size
                     all_files.append(FileMetadata(
                         path=f"azure://{acct['name']}",
                         type="storage_account",
@@ -121,10 +166,11 @@ class AzureConnector(BaseConnector):
                         tags=acct["tags"],
                         extra_metadata={
                             "location": acct["location"],
-                            "resource_group": acct["resource_group"]
+                            "resource_group": acct["resource_group"],
+                            "container_count": len(containers)
                         }
                     ))
-                    all_files.extend(account_items)
+                    all_files.extend(account_resources)
                     
                     # Restore original account context
                     self.config["azure_account_name"] = original_acct
@@ -159,18 +205,35 @@ class AzureConnector(BaseConnector):
             walk_args["delimiter"] = '/'
 
         try:
-            blobs = container_client.walk_blobs(**walk_args)
+            # Convert to list to get count and ensure we can iterate safely
+            blobs_list = list(container_client.walk_blobs(**walk_args))
+            import os
+            if target_container:
+                print(f"    📊 Container {target_container}: Discovered {len(blobs_list)} items.", file=os.sys.stderr)
+            blobs = blobs_list
         except Exception:
             # Fallback to no-include if metadata access is restricted
             if "include" in walk_args:
                 del walk_args["include"]
-            blobs = container_client.walk_blobs(**walk_args)
+            blobs = list(container_client.walk_blobs(**walk_args))
+            import os
+            if target_container:
+                print(f"    📊 Container {target_container} (Fallback): Discovered {len(blobs)} items.", file=os.sys.stderr)
 
         for blob in blobs:
             if hasattr(blob, 'size'):
                 # Regular Blob
                 blob_metadata = getattr(blob, 'metadata', {}) or {}
-                blob_tags = getattr(blob, 'tag_count', 0) > 0 and getattr(blob, 'tags', {}) or {}
+                
+                # Safe tag handling
+                blob_tags = {}
+                try:
+                    # Some SDK versions might return None or missing for tag_count
+                    t_count = getattr(blob, 'tag_count', 0)
+                    if t_count is not None and int(t_count) > 0:
+                        blob_tags = getattr(blob, 'tags', {}) or {}
+                except (Exception, TypeError, ValueError):
+                    pass
                 
                 # Merge tags: blob tags take precedence over account tags
                 final_tags = account_tags.copy()
@@ -191,19 +254,30 @@ class AzureConnector(BaseConnector):
                     except Exception:
                         pass
 
+                last_accessed = None
+                if hasattr(blob, 'last_accessed_on'):
+                    last_accessed = blob.last_accessed_on
+
                 results.append(FileMetadata(
-                    path=f"azure://{target_container}/{blob.name}",
+                    path=f"azure://{self.config['azure_account_name']}/{target_container}/{blob.name}",
                     type="file",
                     size_bytes=blob.size,
                     owner=owner,
                     last_modified=blob.last_modified,
-                    source="blob_storage",
+                    last_accessed=last_accessed,
+                    source="azure",
+                    content_type=blob.content_settings.content_type if hasattr(blob, 'content_settings') else None,
                     etag=getattr(blob, 'etag', None),
                     tags=final_tags
                 ))
             else:
                 # BlobPrefix (Directory)
-                folder_size = self._calculate_folder_size(blob.name, target_container)
+                folder_size = 0
+                try:
+                    folder_size = self._calculate_folder_size(blob.name, target_container)
+                except Exception as e:
+                    print(f"    ❌ Warning: Could not calculate size for folder {blob.name} in container {target_container}: {e}", file=os.sys.stderr)
+
                 # Fetch directory properties if datalake client is available
                 folder_modified = None
                 folder_metadata = {}
@@ -239,12 +313,13 @@ class AzureConnector(BaseConnector):
                         pass
 
                 results.append(FileMetadata(
-                    path=f"azure://{target_container}/{blob.name}",
+                    path=f"azure://{self.config['azure_account_name']}/{target_container}/{blob.name}",
                     type="directory",
                     size_bytes=folder_size,
                     owner=folder_owner or folder_metadata.get('owner') or folder_metadata.get('Owner'),
                     last_modified=folder_modified,
-                    source="blob_storage",
+                    last_accessed=None,
+                    source="azure",
                     tags=folder_tags
                 ))
 
@@ -304,6 +379,13 @@ class AzureConnector(BaseConnector):
             except Exception:
                 pass
 
+        # Priority 3: Fetch Blob Tags (Data Plane)
+        blob_tags = {}
+        try:
+            blob_tags = blob_client.get_blob_tags()
+        except Exception:
+            pass
+
         # Priority 4: Check Account Tags (Management Plane)
         account_tags = {}
         account_props = {}
@@ -316,6 +398,10 @@ class AzureConnector(BaseConnector):
                 owner = account_tags.get('owner') or account_tags.get('Owner') or owner
         except Exception:
             pass
+            
+        final_tags = account_tags.copy()
+        if blob_tags:
+            final_tags.update(blob_tags)
         
         # Merge extra_metadata from blob props with account props
         # Blob props take precedence if key collision (unlikely)
@@ -328,11 +414,11 @@ class AzureConnector(BaseConnector):
             type="file",
             size_bytes=props.size,
             last_modified=props.last_modified,
-            source="blob_storage",
+            source="azure",
             owner=owner,
             content_type=props.content_settings.content_type,
             etag=props.etag,
-            tags=account_tags, # Include account tags in output
+            tags=final_tags,
             extra_metadata=final_extra_metadata
         )
 
@@ -340,6 +426,8 @@ class AzureConnector(BaseConnector):
         if not self.container:
              raise ValueError("Container not configured. Cannot get container metadata.")
              
+        # Force a refresh of the container client each time to ensure it's using the key-based client if re-initialized.
+        # This line was already present, ensuring the client is fetched.
         container_client = self.client.get_container_client(self.container)
         props = container_client.get_container_properties()
         

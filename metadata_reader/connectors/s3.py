@@ -159,7 +159,6 @@ class S3Connector(BaseConnector):
             tags.update(obj_tags) # Object tags override bucket tags if collision
         except Exception:
             pass
-
         # Try to get ACL for owner
         owner_display = None
         try:
@@ -167,18 +166,28 @@ class S3Connector(BaseConnector):
             owner_display = acl_resp["Owner"].get("DisplayName") or acl_resp["Owner"].get("ID")
         except Exception:
             pass
+        # Fetch Object Tags
+        object_tags = {}
+        try:
+            obj_tag_resp = self.client.get_object_tagging(Bucket=self.bucket, Key=key)
+            object_tags = {t["Key"].strip(): t["Value"] for t in obj_tag_resp.get("TagSet", [])}
+        except Exception:
+            pass
+            
+        final_tags = bucket_tags.copy()
+        final_tags.update(object_tags)
 
         return FileMetadata(
-            path=path,
+            path=f"s3://{self.bucket}/{key}",
             type="file",
             size_bytes=response["ContentLength"],
-            owner=owner_display,
+            owner=response.get("Metadata", {}).get("owner") or final_tags.get("owner") or final_tags.get("Owner") or owner_display,
             last_modified=response["LastModified"],
-            last_accessed=None, 
+            last_accessed=None,
             source="s3",
+            tags=final_tags,
             content_type=response.get("ContentType"),
             etag=response.get("ETag"),
-            tags=tags,
             extra_metadata={
                 "storage_class": response.get("StorageClass"),
                 "version_id": response.get("VersionId"),

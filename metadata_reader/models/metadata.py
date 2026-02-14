@@ -19,30 +19,19 @@ class FileMetadata:
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Converts the metadata to a dictionary with serializable values.
-        Datetimes are converted to ISO format strings.
+        Converts the metadata to a dictionary with exactly 7 fields.
+        Includes resource tags as the 7th field.
         """
-        base_dict = {
+        # Strict 7 fields in the specific order requested
+        return {
             "path": self.path,
             "type": self.type,
             "size_bytes": self.size_bytes,
+            "owner": self.owner,
             "last_modified": self.last_modified.isoformat() if self.last_modified else None,
             "source": self.source,
-            "owner": self.owner,
-            "last_accessed": self.last_accessed.isoformat() if self.last_accessed else None,
-            "content_type": self.content_type,
-            "etag": self.etag,
-            "tag": self.tags,
+            "tags": self.tags
         }
-        
-        # Merge extra_metadata into the base dict (Flattening)
-        if self.extra_metadata:
-            base_dict.update(self.extra_metadata)
-            
-        # Remove keys with None values to match clean screenshot style? 
-        # User screenshot didn't show 'content_type': null.
-        # Let's filter out None values.
-        return {k: v for k, v in base_dict.items() if v is not None}
 
     def to_json(self) -> str:
         """

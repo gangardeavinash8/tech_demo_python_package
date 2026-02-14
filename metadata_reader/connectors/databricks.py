@@ -29,56 +29,61 @@ class DatabricksConnector(BaseConnector):
         target_volume = volume or self.volume
 
         if not target_catalog or not target_schema or not target_volume:
-             if prefix.startswith("dbfs:"):
-                 return self._list_dbfs(prefix)
-             
-             # Discovery Mode: Scan all accessible volumes
-             print("🔍 Discovering accessible Databricks Volumes...", file=os.sys.stderr)
-             volumes = self.list_volumes()
-             print(f"Found {len(volumes)} volumes.", file=os.sys.stderr)
-             
-             all_files = []
-             for item in volumes:
-                 try:
-                     if item["type"] == "catalog":
-                         all_files.append(FileMetadata(
-                             path=f"databricks://{item['catalog']}",
-                             type="databricks_catalog",
-                             size_bytes=0,
-                             last_modified=None,
-                             source="databricks",
-                             owner=item["owner"]
-                         ))
-                     elif item["type"] == "schema":
-                         all_files.append(FileMetadata(
-                             path=f"databricks://{item['catalog']}/{item['schema']}",
-                             type="databricks_schema",
-                             size_bytes=0,
-                             last_modified=None,
-                             source="databricks",
-                             owner=item["owner"]
-                         ))
-                     elif item["type"] == "volume":
-                         # Add volume entry itself
-                         all_files.append(FileMetadata(
-                             path=item["full_path"],
-                             type="databricks_volume_resource",
-                             size_bytes=0,
-                             last_modified=None,
-                             source="databricks",
-                             owner=item["owner"]
-                         ))
-                         # Then scan volume contents
-                         all_files.extend(self.list_objects(
-                             catalog=item["catalog"],
-                             schema=item["schema"],
-                             volume=item["name"],
-                             prefix=prefix,
-                             recursive=recursive
-                         ))
-                 except Exception as e:
-                     print(f"  ❌ Error scanning {item['type']} {item.get('full_path', item.get('name'))}: {e}", file=os.sys.stderr)
-             return all_files
+            if prefix.startswith("dbfs:"):
+                return self._list_dbfs(prefix)
+            
+            # Discovery Mode: Scan all accessible volumes
+            print("🔍 Discovering accessible Databricks Volumes...", file=os.sys.stderr)
+            volumes = self.list_volumes()
+            print(f"Found {len(volumes)} resource entries (Catalogs/Schemas/Volumes).", file=os.sys.stderr)
+            
+            all_entries = []
+            for item in volumes:
+                try:
+                    if item["type"] == "catalog":
+                        all_entries.append(FileMetadata(
+                            path=f"databricks://{item['catalog']}",
+                            type="databricks_catalog",
+                            size_bytes=0,
+                            last_modified=None,
+                            source="databricks",
+                            owner=item.get("owner")
+                        ))
+                    elif item["type"] == "schema":
+                        all_entries.append(FileMetadata(
+                            path=f"databricks://{item['catalog']}/{item['schema']}",
+                            type="databricks_schema",
+                            size_bytes=0,
+                            last_modified=None,
+                            source="databricks",
+                            owner=item.get("owner")
+                        ))
+                    elif item["type"] == "volume":
+                        # Scan volume contents for sizing
+                        vol_items = self.list_objects(
+                            catalog=item["catalog"],
+                            schema=item["schema"],
+                            volume=item["name"],
+                            prefix=prefix,
+                            recursive=recursive
+                        )
+                        vol_size = sum(f.size_bytes for f in vol_items if f.type == "file")
+                        
+                        # Add volume entry itself
+                        all_entries.append(FileMetadata(
+                            path=item["full_path"],
+                            type="databricks_volume_resource",
+                            size_bytes=vol_size,
+                            last_modified=None,
+                            source="databricks",
+                            owner=item.get("owner")
+                        ))
+                        # Add volume contents
+                        all_entries.extend(vol_items)
+                except Exception as e:
+                    print(f"  ❌ Error processing {item.get('type')} {item.get('name')}: {e}", file=os.sys.stderr)
+            
+            return all_entries
 
         # Construct Volume Root Path
         volume_root = f"/Volumes/{target_catalog}/{target_schema}/{target_volume}"
