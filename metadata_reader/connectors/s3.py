@@ -37,31 +37,26 @@ class S3Connector(BaseConnector):
             for b in buckets:
                 try:
                     # Fetch bucket metadata (tags, region)
-                    region = "us-east-1"
-                    try:
-                        loc_resp = self.client.get_bucket_location(Bucket=b)
-                        region = loc_resp.get("LocationConstraint") or "us-east-1"
-                    except Exception: pass
+                    region = self.get_bucket_region(b)
+                    tags = self.get_bucket_tags(b)
                     
-                    tags = {}
-                    try:
-                        tag_resp = self.client.get_bucket_tagging(Bucket=b)
-                        tags = {t["Key"]: t["Value"] for t in tag_resp.get("TagSet", [])}
-                    except Exception: pass
+                    # Fetch all objects in bucket
+                    # Note: This recursive call will not re-enter discovery mode for sub-buckets
+                    bucket_items = self.list_objects(bucket=b, prefix=prefix, recursive=recursive)
+                    total_bucket_size = sum(item.size_bytes for item in bucket_items)
 
                     # Add bucket entry itself
                     all_files.append(FileMetadata(
                         path=f"s3://{b}",
                         type="bucket",
-                        size_bytes=0,
+                        size_bytes=total_bucket_size,
                         last_modified=None,
                         source="s3",
                         owner=tags.get("owner") or tags.get("Owner"),
                         tags=tags,
                         extra_metadata={"region": region}
                     ))
-
-                    all_files.extend(self.list_objects(prefix=prefix, bucket=b))
+                    all_files.extend(bucket_items)
                 except Exception as e:
                     print(f" ❌ Error scanning bucket {b}: {e}", file=os.sys.stderr)
             return all_files
@@ -194,18 +189,35 @@ class S3Connector(BaseConnector):
     def get_container_metadata(self, bucket: str = None) -> Dict[str, Any]:
         """Returns metadata about the bucket."""
         target_bucket = bucket or self.bucket
-        # HeadBucket checks existence and permission
-        self.client.head_bucket(Bucket=target_bucket)
-        
-        # Get Location
-        loc_resp = self.client.get_bucket_location(Bucket=target_bucket)
-        region = loc_resp.get("LocationConstraint") or "us-east-1"
-        
-        return {
-            "name": target_bucket,
-            "region": region,
-            "source": "s3"
-        }
+        if not target_bucket:
+            return {}
+            
+        try:
+            region = self.get_bucket_region(target_bucket)
+            tags = self.get_bucket_tags(target_bucket)
+            return {
+                "bucket": target_bucket,
+                "region": region,
+                "tags": tags
+            }
+        except Exception:
+            return {"bucket": target_bucket}
+
+    def get_bucket_region(self, bucket: str) -> str:
+        """Helper to get bucket region."""
+        try:
+            loc_resp = self.client.get_bucket_location(Bucket=bucket)
+            return loc_resp.get("LocationConstraint") or "us-east-1"
+        except Exception:
+            return "us-east-1"
+
+    def get_bucket_tags(self, bucket: str) -> Dict[str, str]:
+        """Helper to get bucket tags."""
+        try:
+            tag_resp = self.client.get_bucket_tagging(Bucket=bucket)
+            return {t["Key"]: t["Value"] for t in tag_resp.get("TagSet", [])}
+        except Exception:
+            return {}
 
     def _calculate_folder_size(self, prefix: str, bucket: str = None) -> int:
         """Calculates total size of a folder by traversing its contents."""

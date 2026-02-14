@@ -100,11 +100,21 @@ class AzureConnector(BaseConnector):
                     containers = self.list_containers(acct["name"])
                     print(f"  📦 Account {acct['name']}: Found {len(containers)} containers: {', '.join(containers)}", file=os.sys.stderr)
                     
+                    account_items = []
+                    for cont in containers:
+                        try:
+                            account_items.extend(self.list_objects(prefix=prefix, container=cont, recursive=recursive))
+                        except Exception as e:
+                            print(f"    ❌ Error scanning container {cont} in {acct['name']}: {e}", file=os.sys.stderr)
+                    
+                    # Calculate total size of the account
+                    total_acct_size = sum(item.size_bytes for item in account_items)
+                    
                     # Add storage account entry itself to results
                     all_files.append(FileMetadata(
                         path=f"azure://{acct['name']}",
                         type="storage_account",
-                        size_bytes=0,
+                        size_bytes=total_acct_size,
                         last_modified=None,
                         source="azure",
                         owner=acct["tags"].get("owner") or acct["tags"].get("Owner"),
@@ -114,13 +124,8 @@ class AzureConnector(BaseConnector):
                             "resource_group": acct["resource_group"]
                         }
                     ))
+                    all_files.extend(account_items)
                     
-                    for cont in containers:
-                        try:
-                            all_files.extend(self.list_objects(prefix=prefix, container=cont, recursive=recursive))
-                        except Exception as e:
-                            print(f"    ❌ Error scanning container {cont} in {acct['name']}: {e}", file=os.sys.stderr)
-                            
                     # Restore original account context
                     self.config["azure_account_name"] = original_acct
                     self._init_data_clients(original_acct)
