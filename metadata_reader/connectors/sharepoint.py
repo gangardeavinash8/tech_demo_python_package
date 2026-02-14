@@ -54,6 +54,27 @@ class SharePointConnector(BaseConnector):
             print(f"Error resolving Site ID: {e}")
             return None
 
+    def list_sites(self, search: str = "*") -> List[Dict[str, str]]:
+        """Lists all accessible SharePoint sites."""
+        headers = self._get_headers()
+        url = f"https://graph.microsoft.com/v1.0/sites?search={search}"
+        sites = []
+        try:
+            while url:
+                resp = requests.get(url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                for site in data.get("value", []):
+                    sites.append({
+                        "id": site["id"],
+                        "name": site.get("displayName") or site.get("name"),
+                        "webUrl": site.get("webUrl")
+                    })
+                url = data.get("@odata.nextLink")
+        except Exception as e:
+            print(f"Error listing SharePoint sites: {e}")
+        return sites
+
     def _get_token(self) -> str:
         token = self.credential.get_token("https://graph.microsoft.com/.default")
         return token.token
@@ -71,8 +92,20 @@ class SharePointConnector(BaseConnector):
         target_site_id = site_id or self.site_id
         target_drive_id = drive_id or self.drive_id
 
+        # Discovery Mode: If no site_id is specified, scan all accessible sites
         if not target_site_id:
-             raise ValueError("SharePoint Site ID not configured and no override provided.")
+            import os
+            print("🔍 Discovering accessible SharePoint Sites...", file=os.sys.stderr)
+            sites = self.list_sites()
+            print(f"Found {len(sites)} sites: {', '.join([s['name'] for s in sites])}", file=os.sys.stderr)
+            
+            all_files = []
+            for site in sites:
+                try:
+                    all_files.extend(self.list_objects(prefix=prefix, site_id=site["id"], drive_id=drive_id))
+                except Exception as e:
+                    print(f"  ❌ Error scanning site {site['name']}: {e}", file=os.sys.stderr)
+            return all_files
 
         # If drive_id is not provided, list all drives (Document Libraries) and their children
         drives = []

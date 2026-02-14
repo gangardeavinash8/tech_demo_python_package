@@ -22,8 +22,7 @@ class DatabricksConnector(BaseConnector):
 
     def list_objects(self, prefix: str = "", catalog: str = None, schema: str = None, volume: str = None, recursive: bool = True) -> List[FileMetadata]:
         """
-        Lists files from the configured Unity Catalog Volume.
-        Path format: /Volumes/catalog/schema/volume
+        Lists files from the configured Unity Catalog Volume or scans all accessible volumes.
         """
         target_catalog = catalog or self.catalog
         target_schema = schema or self.schema
@@ -32,7 +31,25 @@ class DatabricksConnector(BaseConnector):
         if not target_catalog or not target_schema or not target_volume:
              if prefix.startswith("dbfs:"):
                  return self._list_dbfs(prefix)
-             raise ValueError("Databricks Catalog, Schema, and Volume must be configured or provided as overrides.")
+             
+             # Discovery Mode: Scan all accessible volumes
+             print("🔍 Discovering accessible Databricks Volumes...", file=os.sys.stderr)
+             volumes = self.list_volumes()
+             print(f"Found {len(volumes)} volumes.", file=os.sys.stderr)
+             
+             all_files = []
+             for vol in volumes:
+                 try:
+                     all_files.extend(self.list_objects(
+                         catalog=vol["catalog"],
+                         schema=vol["schema"],
+                         volume=vol["name"],
+                         prefix=prefix,
+                         recursive=recursive
+                     ))
+                 except Exception as e:
+                     print(f"  ❌ Error scanning volume {vol['full_path']}: {e}", file=os.sys.stderr)
+             return all_files
 
         # Construct Volume Root Path
         volume_root = f"/Volumes/{target_catalog}/{target_schema}/{target_volume}"

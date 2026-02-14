@@ -63,8 +63,35 @@ class AzureConnector(BaseConnector):
 
     def list_objects(self, prefix: str = "", container: str = None, recursive: bool = True) -> List[FileMetadata]:
         target_container = container or self.container
+        
+        # Discovery Mode: If no container is specified, scan all accessible storage accounts and containers
         if not target_container:
-            raise ValueError("Container not configured and no override provided.")
+            import os
+            print("🔍 Discovering accessible Azure Storage Accounts...", file=os.sys.stderr)
+            accounts = self.list_storage_accounts()
+            print(f"Found {len(accounts)} accounts: {', '.join([a['name'] for a in accounts])}", file=os.sys.stderr)
+            
+            all_files = []
+            for acct in accounts:
+                try:
+                    # Update config temporarily for this account to list containers
+                    original_acct = self.config.get("azure_account_name")
+                    self.config["azure_account_name"] = acct["name"]
+                    
+                    containers = self.list_containers(acct["name"])
+                    print(f"  📦 Account {acct['name']}: Found {len(containers)} containers: {', '.join(containers)}", file=os.sys.stderr)
+                    
+                    for cont in containers:
+                        try:
+                            all_files.extend(self.list_objects(prefix=prefix, container=cont, recursive=recursive))
+                        except Exception as e:
+                            print(f"    ❌ Error scanning container {cont} in {acct['name']}: {e}", file=os.sys.stderr)
+                            
+                    # Restore original account name
+                    self.config["azure_account_name"] = original_acct
+                except Exception as e:
+                    print(f"  ❌ Error scanning account {acct['name']}: {e}", file=os.sys.stderr)
+            return all_files
             
         container_client = self.client.get_container_client(target_container)
         results = []
