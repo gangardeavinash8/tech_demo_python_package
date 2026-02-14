@@ -112,7 +112,7 @@ class AzureConnector(BaseConnector):
         # Avoid including 'tags' as it requires higher permissions (Data Owner) that may be missing
         walk_args = {
             "name_starts_with": prefix,
-            "include": ['metadata']
+            "include": ['metadata', 'tags']
         }
         if not recursive:
             walk_args["delimiter"] = '/'
@@ -129,7 +129,15 @@ class AzureConnector(BaseConnector):
             if hasattr(blob, 'size'):
                 # Regular Blob
                 blob_metadata = getattr(blob, 'metadata', {}) or {}
-                owner = blob_metadata.get('owner') or blob_metadata.get('Owner') or \
+                blob_tags = getattr(blob, 'tag_count', 0) > 0 and getattr(blob, 'tags', {}) or {}
+                
+                # Merge tags: blob tags take precedence over account tags
+                final_tags = account_tags.copy()
+                if blob_tags:
+                    final_tags.update(blob_tags)
+
+                owner = blob_tags.get('owner') or blob_tags.get('Owner') or \
+                        blob_metadata.get('owner') or blob_metadata.get('Owner') or \
                         account_tags.get('owner') or account_tags.get('Owner')
                 
                 # Fetch POSIX owner if HNS is enabled
@@ -150,7 +158,7 @@ class AzureConnector(BaseConnector):
                     last_modified=blob.last_modified,
                     source="blob_storage",
                     etag=getattr(blob, 'etag', None),
-                    tags=account_tags
+                    tags=final_tags
                 ))
             else:
                 # BlobPrefix (Directory)
